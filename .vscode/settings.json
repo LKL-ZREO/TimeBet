@@ -1,0 +1,11 @@
+{
+  "dotnet.defaultSolution": "TimeBet.sln",
+  "editor.formatOnSave": true,
+  "files.exclude": {
+    "**/bin": true,
+    "**/obj": true,
+    "frontend/node_modules": true,
+    "frontend/dist": true
+  },
+  "typescript.tsdk": "frontend/node_modules/typescript/lib"
+}

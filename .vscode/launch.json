@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "TimeBet Desktop",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build: all",
+      "program": "${workspaceFolder}/src/TimeBet.Desktop/bin/Debug/net10.0-windows10.0.19041.0/TimeBet.Desktop.exe",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    }
+  ]
+}

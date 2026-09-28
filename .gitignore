@@ -1,0 +1,37 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userprefs
+.vs/
+TestResults/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
+
+# Runtime data
+.timebet-data/
+*.db
+*.db-shm
+*.db-wal
+logs/
+
+# Editors and operating systems
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Installer prerequisites downloaded by the build script
+installer/.cache/
+
+# Local build, packaging, smoke-test, and UI review artifacts
+output/

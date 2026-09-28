@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "frontend: dev",
+      "type": "shell",
+      "command": "pnpm --dir frontend dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "frontend: build",
+      "type": "shell",
+      "command": "pnpm --dir frontend build",
+      "problemMatcher": []
+    },
+    {
+      "label": "dotnet: build",
+      "type": "shell",
+      "command": "dotnet build TimeBet.sln",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "build: all",
+      "dependsOrder": "sequence",
+      "dependsOn": ["frontend: build", "dotnet: build"],
+      "problemMatcher": []
+    },
+    {
+      "label": "test: all",
+      "type": "shell",
+      "command": "pnpm --dir frontend test; if ($LASTEXITCODE -eq 0) { dotnet test TimeBet.sln }",
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}
