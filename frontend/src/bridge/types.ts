@@ -50,6 +50,36 @@ export type FinishSessionResult = {
   }
 }
 
+export type LeisureStatus = 'running' | 'paused' | 'completed'
+
+export type LeisureSession = {
+  id: string
+  activity: string
+  plannedSeconds: number
+  status: LeisureStatus
+  startedAtUtc: string
+  lastTransitionAtUtc: string
+  pausedAtUtc: string | null
+  endedAtUtc: string | null
+  effectiveDurationSeconds: number
+  chargedSeconds: number
+  completionNote: string | null
+}
+
+export type LeisureState = {
+  session: LeisureSession | null
+  balanceSeconds: number
+  asOfUtc: string
+}
+
+export type FinishLeisureResult = {
+  state: LeisureState
+  completedSession: LeisureSession & {
+    status: 'completed'
+    endedAtUtc: string
+  }
+}
+
 export type BridgeMethod =
   | 'session.current'
   | 'session.start'
@@ -57,15 +87,23 @@ export type BridgeMethod =
   | 'session.resume'
   | 'session.finish'
   | 'session.relevance.current'
+  | 'leisure.current'
+  | 'leisure.start'
+  | 'leisure.pause'
+  | 'leisure.resume'
+  | 'leisure.finish'
   | 'task.list'
   | 'task.create'
   | 'task.set-completed'
+  | 'task.milestone.add'
+  | 'task.milestone.set-completed'
   | 'planner.today'
   | 'planner.week'
   | 'timeblock.create'
   | 'timeblock.move'
   | 'timeblock.defer'
   | 'timeblock.skip'
+  | 'timeblock.delete'
   | 'ledger.balance'
   | 'timeline.today'
   | 'tracking.settings.get'
@@ -85,6 +123,16 @@ export type BridgeMethod =
   | 'challenge.settings.update'
   | 'challenge.play'
 
+export type TaskMilestone = {
+  id: string
+  taskId: string
+  content: string
+  sortOrder: number
+  isCompleted: boolean
+  createdAtUtc: string
+  completedAtUtc: string | null
+}
+
 export type PlanningTask = {
   id: string
   title: string
@@ -94,6 +142,7 @@ export type PlanningTask = {
   status: 'active' | 'completed' | 'archived'
   createdAtUtc: string
   completedAtUtc: string | null
+  milestones?: TaskMilestone[]
 }
 
 export type PlanningTimeBlock = {

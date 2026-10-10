@@ -4,6 +4,7 @@ using System.Windows;
 using TimeBet.Application.Analytics;
 using TimeBet.Application.AI;
 using TimeBet.Application.Challenges;
+using TimeBet.Application.Leisure;
 using TimeBet.Application.Rewards;
 using TimeBet.Application.Reviews;
 using TimeBet.Application.Sessions;
@@ -39,11 +40,14 @@ public partial class App : System.Windows.Application, IAsyncDisposable
             var challengeRepository = new SqliteChallengeRepository(connectionFactory);
             var planningTaskRepository = new SqlitePlanningTaskRepository(connectionFactory);
             var planningTimeBlockRepository = new SqlitePlanningTimeBlockRepository(connectionFactory);
+            var planningTaskMilestoneRepository = new SqlitePlanningTaskMilestoneRepository(connectionFactory);
+            var leisureSessionRepository = new SqliteLeisureSessionRepository(connectionFactory);
             var clock = new SystemClock();
             var taskService = new TaskService(
                 planningTaskRepository,
                 clock,
-                planningTimeBlockRepository);
+                planningTimeBlockRepository,
+                planningTaskMilestoneRepository);
             var plannerService = new PlannerService(
                 planningTimeBlockRepository,
                 planningTaskRepository,
@@ -53,7 +57,13 @@ public partial class App : System.Windows.Application, IAsyncDisposable
                 ledger,
                 clock,
                 planningTaskRepository,
-                planningTimeBlockRepository);
+                planningTimeBlockRepository,
+                leisureSessionRepository);
+            var leisureSessionService = new LeisureSessionService(
+                leisureSessionRepository,
+                sessions,
+                ledger,
+                clock);
             var screenshotRoot = ResolveScreenshotRoot();
             var timelineService = new TimelineService(timelineRepository, trackingSettings, screenshotRoot);
             var rewardService = new RewardService(rewardRepository, ledger, clock);
@@ -100,7 +110,8 @@ public partial class App : System.Windows.Application, IAsyncDisposable
                 plannerService,
                 activityEvidence,
                 dailyReviewService,
-                aiReviewService);
+                aiReviewService,
+                leisureSessionService);
             MainWindow = window;
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             window.Show();

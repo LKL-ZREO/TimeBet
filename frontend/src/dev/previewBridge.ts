@@ -6,10 +6,13 @@ import type {
   DailyReview,
   AiSettings,
   LedgerEntry,
+  LeisureSession,
+  LeisureState,
   PlanningTask,
   PlanningTimeBlock,
   RewardCatalog,
   StudyState,
+  TaskMilestone,
   TodayPlan,
   TrackingOverview,
   WeekPlan,
@@ -38,13 +41,96 @@ export function installPreviewBridge() {
       },
     ],
   }
-  const studyState: StudyState = {
+  let studyState: StudyState = {
     session: null,
     balanceSeconds: rewardCatalog.balanceSeconds,
     asOfUtc: now,
   }
-  let planningTasks: PlanningTask[] = []
-  let planningBlocks: PlanningTimeBlock[] = []
+  let leisureState: LeisureState = {
+    session: null,
+    balanceSeconds: rewardCatalog.balanceSeconds,
+    asOfUtc: now,
+  }
+  const previewDate = localDate(new Date())
+  const dueIn = (days: number) => {
+    const value = new Date()
+    value.setDate(value.getDate() + days)
+    return localDate(value)
+  }
+  const mathTaskId = crypto.randomUUID()
+  const englishTaskId = crypto.randomUUID()
+  const reportTaskId = crypto.randomUUID()
+  let planningTasks: PlanningTask[] = [
+    {
+      id: mathTaskId,
+      title: '高数期中复习',
+      estimatedSeconds: 400 * 60,
+      actualSeconds: 260 * 60,
+      dueDate: previewDate,
+      status: 'active',
+      createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+      completedAtUtc: null,
+      milestones: [
+        milestone(mathTaskId, '整理公式与题型', 0, true),
+        milestone(mathTaskId, '完成极限专题', 1, true),
+        milestone(mathTaskId, '错题复盘与自测', 2),
+      ],
+    },
+    {
+      id: englishTaskId,
+      title: '英语四级听力',
+      estimatedSeconds: 300 * 60,
+      actualSeconds: 120 * 60,
+      dueDate: dueIn(12),
+      status: 'active',
+      createdAtUtc: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      completedAtUtc: null,
+      milestones: [
+        milestone(englishTaskId, '精听两套真题', 0, true),
+        milestone(englishTaskId, '整理高频错词', 1),
+        milestone(englishTaskId, '完成一次模拟', 2),
+      ],
+    },
+    {
+      id: reportTaskId,
+      title: '课程项目报告',
+      estimatedSeconds: 240 * 60,
+      actualSeconds: 60 * 60,
+      dueDate: dueIn(4),
+      status: 'active',
+      createdAtUtc: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      completedAtUtc: null,
+      milestones: [
+        milestone(reportTaskId, '完成报告大纲', 0, true),
+        milestone(reportTaskId, '补齐核心内容', 1),
+        milestone(reportTaskId, '检查格式并提交', 2),
+      ],
+    },
+  ]
+  let planningBlocks: PlanningTimeBlock[] = [
+    {
+      id: crypto.randomUUID(),
+      taskId: mathTaskId,
+      taskTitle: '高数期中复习',
+      dueDate: previewDate,
+      startsAtUtc: new Date(`${previewDate}T10:30:00`).toISOString(),
+      plannedSeconds: 45 * 60,
+      actualSeconds: 0,
+      status: 'planned',
+      resolvedAtUtc: null,
+    },
+    {
+      id: crypto.randomUUID(),
+      taskId: englishTaskId,
+      taskTitle: '英语四级听力',
+      dueDate: dueIn(12),
+      startsAtUtc: new Date(`${previewDate}T14:00:00`).toISOString(),
+      plannedSeconds: 40 * 60,
+      actualSeconds: 0,
+      status: 'planned',
+      resolvedAtUtc: null,
+    },
+  ]
   const tracking: TrackingOverview = {
     settings: {
       captureActivity: true,
@@ -113,6 +199,251 @@ export function installPreviewBridge() {
           case 'session.current':
             result = studyState
             break
+          case 'session.start': {
+            const payload = request.payload as {
+              goal: string
+              captureScreenshots: boolean
+              taskId?: string
+              timeBlockId?: string
+            }
+            const startedAt = new Date().toISOString()
+            studyState = {
+              session: {
+                id: crypto.randomUUID(),
+                goal: payload.goal,
+                taskId: payload.taskId ?? null,
+                timeBlockId: payload.timeBlockId ?? null,
+                captureScreenshots: payload.captureScreenshots,
+                status: 'running',
+                startedAtUtc: startedAt,
+                lastTransitionAtUtc: startedAt,
+                pausedAtUtc: null,
+                endedAtUtc: null,
+                effectiveDurationSeconds: 0,
+                completionNote: null,
+              },
+              balanceSeconds: studyState.balanceSeconds,
+              asOfUtc: startedAt,
+            }
+            result = studyState
+            break
+          }
+          case 'session.pause': {
+            const pausedAt = new Date().toISOString()
+            if (studyState.session) {
+              studyState = {
+                ...studyState,
+                session: {
+                  ...studyState.session,
+                  status: 'paused',
+                  pausedAtUtc: pausedAt,
+                  lastTransitionAtUtc: pausedAt,
+                },
+                asOfUtc: pausedAt,
+              }
+            }
+            result = studyState
+            break
+          }
+          case 'session.resume': {
+            const resumedAt = new Date().toISOString()
+            if (studyState.session) {
+              studyState = {
+                ...studyState,
+                session: {
+                  ...studyState.session,
+                  status: 'running',
+                  pausedAtUtc: null,
+                  lastTransitionAtUtc: resumedAt,
+                },
+                asOfUtc: resumedAt,
+              }
+            }
+            result = studyState
+            break
+          }
+          case 'session.finish': {
+            const payload = request.payload as { completionNote?: string }
+            const current = studyState.session!
+            const endedAt = new Date().toISOString()
+            const liveSeconds =
+              current.status === 'running'
+                ? Math.max(
+                    1,
+                    Math.floor(
+                      (new Date(endedAt).getTime() -
+                        new Date(current.lastTransitionAtUtc).getTime()) /
+                        1000,
+                    ),
+                  )
+                : 0
+            const effectiveDurationSeconds =
+              current.effectiveDurationSeconds + liveSeconds
+            const completedSession = {
+              ...current,
+              status: 'completed' as const,
+              endedAtUtc: endedAt,
+              lastTransitionAtUtc: endedAt,
+              pausedAtUtc: null,
+              effectiveDurationSeconds,
+              completionNote: payload.completionNote ?? '',
+            }
+            const nextBalance =
+              studyState.balanceSeconds + effectiveDurationSeconds
+            studyState = {
+              session: null,
+              balanceSeconds: nextBalance,
+              asOfUtc: endedAt,
+            }
+            leisureState = {
+              ...leisureState,
+              balanceSeconds: nextBalance,
+              asOfUtc: endedAt,
+            }
+            rewardCatalog.balanceSeconds = nextBalance
+            if (current.taskId) {
+              planningTasks = planningTasks.map((task) =>
+                task.id === current.taskId
+                  ? {
+                      ...task,
+                      actualSeconds:
+                        task.actualSeconds + effectiveDurationSeconds,
+                    }
+                  : task,
+              )
+            }
+            if (current.timeBlockId) {
+              planningBlocks = planningBlocks.map((block) =>
+                block.id === current.timeBlockId
+                  ? {
+                      ...block,
+                      status: 'completed',
+                      actualSeconds: effectiveDurationSeconds,
+                      resolvedAtUtc: endedAt,
+                    }
+                  : block,
+              )
+            }
+            result = { state: studyState, completedSession }
+            break
+          }
+          case 'leisure.current':
+            result = leisureState
+            break
+          case 'leisure.start': {
+            const payload = request.payload as {
+              activity: string
+              plannedMinutes: number
+            }
+            const startedAt = new Date().toISOString()
+            leisureState = {
+              session: {
+                id: crypto.randomUUID(),
+                activity: payload.activity,
+                plannedSeconds: payload.plannedMinutes * 60,
+                status: 'running',
+                startedAtUtc: startedAt,
+                lastTransitionAtUtc: startedAt,
+                pausedAtUtc: null,
+                endedAtUtc: null,
+                effectiveDurationSeconds: 0,
+                chargedSeconds: 0,
+                completionNote: null,
+              },
+              balanceSeconds: studyState.balanceSeconds,
+              asOfUtc: startedAt,
+            }
+            result = leisureState
+            break
+          }
+          case 'leisure.pause': {
+            const asOf = new Date().toISOString()
+            if (leisureState.session) {
+              leisureState = {
+                ...leisureState,
+                session: {
+                  ...leisureState.session,
+                  status: 'paused',
+                  pausedAtUtc: asOf,
+                  lastTransitionAtUtc: asOf,
+                  effectiveDurationSeconds: previewLeisureElapsed(
+                    leisureState.session,
+                    leisureState.asOfUtc,
+                    asOf,
+                  ),
+                },
+                asOfUtc: asOf,
+              }
+            }
+            result = leisureState
+            break
+          }
+          case 'leisure.resume': {
+            const asOf = new Date().toISOString()
+            if (leisureState.session) {
+              leisureState = {
+                ...leisureState,
+                session: {
+                  ...leisureState.session,
+                  status: 'running',
+                  pausedAtUtc: null,
+                  lastTransitionAtUtc: asOf,
+                },
+                asOfUtc: asOf,
+              }
+            }
+            result = leisureState
+            break
+          }
+          case 'leisure.finish': {
+            const payload = request.payload as { completionNote?: string }
+            const endedAt = new Date().toISOString()
+            const current = leisureState.session!
+            const effectiveDurationSeconds = Math.max(
+              1,
+              previewLeisureElapsed(current, leisureState.asOfUtc, endedAt),
+            )
+            const chargedSeconds = Math.min(
+              effectiveDurationSeconds,
+              leisureState.balanceSeconds,
+            )
+            const completedSession: LeisureSession = {
+              ...current,
+              status: 'completed',
+              pausedAtUtc: null,
+              endedAtUtc: endedAt,
+              lastTransitionAtUtc: endedAt,
+              effectiveDurationSeconds,
+              chargedSeconds,
+              completionNote: payload.completionNote ?? null,
+            }
+            const nextBalance = leisureState.balanceSeconds - chargedSeconds
+            leisureState = {
+              session: null,
+              balanceSeconds: nextBalance,
+              asOfUtc: endedAt,
+            }
+            studyState = {
+              ...studyState,
+              balanceSeconds: nextBalance,
+              asOfUtc: endedAt,
+            }
+            rewardCatalog.balanceSeconds = nextBalance
+            ledgerEntries.unshift({
+              id: crypto.randomUUID(),
+              type: 'spend',
+              amountSeconds: -chargedSeconds,
+              sourceType: 'leisure-session',
+              sourceId: completedSession.id,
+              note: `自由时间：${completedSession.activity}`,
+              occurredAtUtc: endedAt,
+            })
+            result = {
+              state: leisureState,
+              completedSession,
+            }
+            break
+          }
           case 'task.list':
             result = planningTasks.filter((task) => task.status === 'active')
             break
@@ -133,6 +464,7 @@ export function installPreviewBridge() {
               status: 'active',
               createdAtUtc: new Date().toISOString(),
               completedAtUtc: null,
+              milestones: [],
             }
             planningTasks = [task, ...planningTasks]
             result = task
@@ -240,6 +572,61 @@ export function installPreviewBridge() {
               )
               result = updated
             }
+            break
+          }
+          case 'task.milestone.add': {
+            const payload = request.payload as {
+              taskId: string
+              content: string
+            }
+            const task = planningTasks.find(
+              (item) => item.id === payload.taskId,
+            )!
+            const created = milestone(
+              task.id,
+              payload.content,
+              (task.milestones ?? []).length,
+            )
+            planningTasks = planningTasks.map((item) =>
+              item.id === task.id
+                ? {
+                    ...item,
+                    milestones: [...(item.milestones ?? []), created],
+                  }
+                : item,
+            )
+            result = created
+            break
+          }
+          case 'task.milestone.set-completed': {
+            const payload = request.payload as {
+              id: string
+              completed: boolean
+            }
+            const changedAt = new Date().toISOString()
+            let updatedMilestone = planningTasks
+              .flatMap((task) => task.milestones ?? [])
+              .find((item) => item.id === payload.id)!
+            updatedMilestone = {
+              ...updatedMilestone,
+              isCompleted: payload.completed,
+              completedAtUtc: payload.completed ? changedAt : null,
+            }
+            planningTasks = planningTasks.map((task) => ({
+              ...task,
+              milestones: (task.milestones ?? []).map((item) =>
+                item.id === updatedMilestone.id ? updatedMilestone : item,
+              ),
+            }))
+            result = updatedMilestone
+            break
+          }
+          case 'timeblock.delete': {
+            const payload = request.payload as { id: string }
+            planningBlocks = planningBlocks.filter(
+              (block) => block.id !== payload.id,
+            )
+            result = null
             break
           }
           case 'timeline.today':
@@ -427,6 +814,41 @@ function localDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function milestone(
+  taskId: string,
+  content: string,
+  sortOrder: number,
+  isCompleted = false,
+): TaskMilestone {
+  const completedAtUtc = isCompleted ? now : null
+  return {
+    id: crypto.randomUUID(),
+    taskId,
+    content,
+    sortOrder,
+    isCompleted,
+    createdAtUtc: now,
+    completedAtUtc,
+  }
+}
+
+function previewLeisureElapsed(
+  session: LeisureSession,
+  stateAsOfUtc: string,
+  nowUtc: string,
+) {
+  if (session.status !== 'running') return session.effectiveDurationSeconds
+  return (
+    session.effectiveDurationSeconds +
+    Math.max(
+      0,
+      Math.floor(
+        (new Date(nowUtc).getTime() - new Date(stateAsOfUtc).getTime()) / 1000,
+      ),
+    )
+  )
 }
 
 function previewChallenge(): ChallengeOverview {

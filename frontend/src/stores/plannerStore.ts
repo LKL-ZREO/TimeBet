@@ -23,6 +23,7 @@ type PlannerStore = {
     plannedMinutes: number,
   ): Promise<boolean>
   defer(id: string): Promise<boolean>
+  remove(id: string): Promise<boolean>
   clearError(): void
 }
 
@@ -105,6 +106,19 @@ export const usePlannerStore = create<PlannerStore>((set, get) => ({
     set({ saving: true, error: null })
     try {
       await callBridge<PlanningTimeBlock>('timeblock.defer', { id })
+      set({ saving: false })
+      await refresh(get)
+      return true
+    } catch (error) {
+      set({ saving: false, error: errorMessage(error) })
+      return false
+    }
+  },
+
+  async remove(id) {
+    set({ saving: true, error: null })
+    try {
+      await callBridge('timeblock.delete', { id })
       set({ saving: false })
       await refresh(get)
       return true

@@ -29,5 +29,7 @@ public interface IPlanningTimeBlockRepository
         int plannedSeconds,
         CancellationToken cancellationToken = default);
 
+    Task DeletePlannedAsync(Guid id, CancellationToken cancellationToken = default);
+
     Task SkipAsync(Guid id, DateTimeOffset skippedAtUtc, CancellationToken cancellationToken = default);
 }

@@ -4,6 +4,7 @@ using Microsoft.Web.WebView2.Core;
 using TimeBet.Application.Analytics;
 using TimeBet.Application.AI;
 using TimeBet.Application.Challenges;
+using TimeBet.Application.Leisure;
 using TimeBet.Application.Rewards;
 using TimeBet.Application.Relevance;
 using TimeBet.Application.Reviews;
@@ -28,6 +29,7 @@ public sealed class WebViewBridge
     private readonly IActivityEvidenceSource? activityEvidence;
     private readonly TaskService? planningTasks;
     private readonly PlannerService? planner;
+    private readonly LeisureSessionService? leisure;
     private readonly Func<Task<SummaryExportResult>> exportSummary;
     private CoreWebView2? webView;
 
@@ -42,7 +44,8 @@ public sealed class WebViewBridge
         PlannerService? planner = null,
         IActivityEvidenceSource? activityEvidence = null,
         DailyReviewService? dailyReview = null,
-        AiReviewService? aiReview = null)
+        AiReviewService? aiReview = null,
+        LeisureSessionService? leisure = null)
     {
         this.studySessions = studySessions;
         this.timeline = timeline;
@@ -54,6 +57,7 @@ public sealed class WebViewBridge
         this.planner = planner;
         this.dailyReview = dailyReview;
         this.aiReview = aiReview;
+        this.leisure = leisure;
         this.exportSummary = exportSummary ?? (() => Task.FromResult(new SummaryExportResult(false, null)));
     }
 
@@ -149,11 +153,22 @@ public sealed class WebViewBridge
             "session.resume" => await studySessions.ResumeAsync(),
             "session.finish" => await studySessions.FinishAsync(Deserialize<FinishSessionRequest>(request.Payload)),
             "session.relevance.current" => await GetCurrentRelevanceAsync(),
+            "leisure.current" => await RequireLeisure().GetStateAsync(),
+            "leisure.start" => await RequireLeisure().StartAsync(
+                Deserialize<StartLeisureRequest>(request.Payload)),
+            "leisure.pause" => await RequireLeisure().PauseAsync(),
+            "leisure.resume" => await RequireLeisure().ResumeAsync(),
+            "leisure.finish" => await RequireLeisure().FinishAsync(
+                Deserialize<FinishLeisureRequest>(request.Payload)),
             "task.list" => await RequirePlanningTasks().GetActiveAsync(),
             "task.create" => await RequirePlanningTasks().CreateAsync(
                 Deserialize<CreateTaskRequest>(request.Payload)),
             "task.set-completed" => await RequirePlanningTasks().SetCompletedAsync(
                 Deserialize<SetTaskCompletedRequest>(request.Payload)),
+            "task.milestone.add" => await RequirePlanningTasks().AddMilestoneAsync(
+                Deserialize<AddTaskMilestoneRequest>(request.Payload)),
+            "task.milestone.set-completed" => await RequirePlanningTasks().SetMilestoneCompletedAsync(
+                Deserialize<SetTaskMilestoneCompletedRequest>(request.Payload)),
             "planner.today" => await RequirePlanner().GetTodayAsync(),
             "planner.week" => await RequirePlanner().GetWeekAsync(),
             "timeblock.create" => await RequirePlanner().CreateAsync(
@@ -164,6 +179,8 @@ public sealed class WebViewBridge
                 Deserialize<DeferTimeBlockRequest>(request.Payload)),
             "timeblock.skip" => await RequirePlanner().SkipAsync(
                 Deserialize<SkipTimeBlockRequest>(request.Payload)),
+            "timeblock.delete" => await RequirePlanner().DeleteAsync(
+                Deserialize<DeleteTimeBlockRequest>(request.Payload)),
             "ledger.balance" => new { balanceSeconds = await GetBalanceAsync() },
             "timeline.today" => await timeline.GetOverviewAsync(),
             "tracking.settings.get" => (await timeline.GetOverviewAsync()).Settings,
@@ -251,6 +268,12 @@ public sealed class WebViewBridge
     {
         return aiReview
             ?? throw new BridgeRequestException("feature_unavailable", "AI 回顾服务尚未启动。");
+    }
+
+    private LeisureSessionService RequireLeisure()
+    {
+        return leisure
+            ?? throw new BridgeRequestException("feature_unavailable", "自由时间服务尚未启动。");
     }
 
     private static T Deserialize<T>(JsonElement payload)

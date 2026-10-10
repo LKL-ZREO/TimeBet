@@ -14,6 +14,8 @@ public sealed record MoveTimeBlockRequest(
 
 public sealed record DeferTimeBlockRequest(Guid Id);
 
+public sealed record DeleteTimeBlockRequest(Guid Id);
+
 public sealed record PlanningTimeBlockSnapshot(
     Guid Id,
     Guid TaskId,

@@ -16,12 +16,15 @@ import {
   Camera,
   ChartNoAxesColumnIncreasing,
   Check,
+  ChevronDown,
   Clock3,
   Cloud,
+  Coffee,
   Crown,
   Download,
   Gift,
   GripVertical,
+  House,
   LoaderCircle,
   Medal,
   Minus,
@@ -58,6 +61,8 @@ import type {
   WeekPlan,
   TaskRelevanceSnapshot,
   AiSettings,
+  DailyReview,
+  LeisureSession,
 } from './bridge/types'
 import { callBridge } from './bridge/webview'
 import { useSessionStore } from './stores/sessionStore'
@@ -68,11 +73,13 @@ import { useChallengeStore } from './stores/challengeStore'
 import { useTaskStore } from './stores/taskStore'
 import { usePlannerStore } from './stores/plannerStore'
 import { useRelevanceStore } from './stores/relevanceStore'
+import { useLeisureStore } from './stores/leisureStore'
 import './App.css'
 
 type Theme = 'light' | 'dark'
 type ViewKey =
   | 'focus'
+  | 'leisure'
   | 'planner'
   | 'timeline'
   | 'analytics'
@@ -111,16 +118,20 @@ const FeedbackContext = createContext<{
 } | null>(null)
 
 const views: ViewDefinition[] = [
-  { key: 'focus', label: '今日专注', icon: Clock3 },
-  { key: 'planner', label: '本周计划', icon: CalendarRange },
-  { key: 'timeline', label: '学习时间轴', icon: CalendarDays },
-  { key: 'analytics', label: '数据统计', icon: ChartNoAxesColumnIncreasing },
+  { key: 'focus', label: '今天', icon: House },
+  { key: 'planner', label: '任务', icon: CalendarRange },
+  { key: 'analytics', label: '成长', icon: ChartNoAxesColumnIncreasing },
+  { key: 'leisure', label: '自由时间', icon: Coffee },
+  { key: 'timeline', label: '活动记录', icon: CalendarDays },
   { key: 'rewards', label: '奖励商店', icon: Gift },
   { key: 'challenge', label: '时间挑战', icon: Sparkles },
   { key: 'settings', label: '设置', icon: Settings2 },
 ]
 
+const primaryViewKeys = new Set<ViewKey>(['focus', 'planner', 'analytics'])
+
 const emptyStateCopy: Record<Exclude<ViewKey, 'focus'>, string> = {
+  leisure: '把学习积累的时间，安心地留给自己。',
   planner: '把任务安排到本周的具体日期和时间。',
   timeline: '完成第一个学习时间块后，今天的活动会出现在这里。',
   analytics: '学习记录积累后，这里会显示日、周和科目趋势。',
@@ -2488,6 +2499,1149 @@ function WeeklyPlannerView() {
   )
 }
 
+function LeisureView() {
+  const { showFeedback } = useFeedback()
+  const {
+    state,
+    receipt,
+    loading,
+    submitting,
+    error,
+    start,
+    pause,
+    resume,
+    finish,
+    clearError,
+    dismissReceipt,
+  } = useLeisureStore()
+  const activeStudySession = useSessionStore((store) => store.state?.session)
+  const refreshStudyState = useSessionStore((store) => store.initialize)
+  const [activity, setActivity] = useState('玩一会儿游戏')
+  const [plannedMinutes, setPlannedMinutes] = useState('30')
+  const [completionNote, setCompletionNote] = useState('')
+  const session = state?.session ?? null
+  const elapsedSeconds = useElapsedSeconds(session, state?.asOfUtc)
+  const balanceSeconds = state?.balanceSeconds ?? 0
+  const projectedCharge = Math.min(elapsedSeconds, balanceSeconds)
+  const projectedBalance = Math.max(0, balanceSeconds - elapsedSeconds)
+  const plannedRemaining = session
+    ? Math.max(0, session.plannedSeconds - elapsedSeconds)
+    : 0
+  const overBudget = session
+    ? Math.max(0, elapsedSeconds - session.plannedSeconds)
+    : 0
+  const progress = session
+    ? Math.min(100, (elapsedSeconds / session.plannedSeconds) * 100)
+    : 0
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const minutes = Number(plannedMinutes)
+    if (!activity.trim() || !Number.isFinite(minutes) || minutes <= 0) return
+    const ok = await start(activity.trim(), Math.floor(minutes))
+    if (ok) {
+      showFeedback({
+        tone: 'success',
+        title: '自由时间开始了',
+        detail: `${activity.trim()} · 预算 ${Math.floor(minutes)} 分钟`,
+      })
+    }
+  }
+
+  const toggle = async () => {
+    if (!session) return
+    const isPausing = session.status === 'running'
+    const ok = isPausing ? await pause() : await resume()
+    if (ok) {
+      showFeedback({
+        tone: 'info',
+        title: isPausing ? '自由时间已暂停' : '继续使用自由时间',
+        detail: session.activity,
+      })
+    }
+  }
+
+  const settle = async () => {
+    if (!session || elapsedSeconds < 1) return
+    const ok = await finish(completionNote.trim() || undefined)
+    if (ok) {
+      setCompletionNote('')
+      await refreshStudyState()
+    }
+  }
+
+  if (loading && !state) {
+    return <LoadingPanel label="正在读取自由时间账户" />
+  }
+
+  return (
+    <>
+      {error && <InlineError message={error} onClose={clearError} />}
+      {!session ? (
+        <div className="leisure-layout">
+          <section className="leisure-hero" aria-labelledby="leisure-title">
+            <div className="leisure-copy">
+              <span className="leisure-kicker">
+                <Coffee aria-hidden="true" size={16} />
+                使用你已经存下的时间
+              </span>
+              <h2 id="leisure-title">认真学习，也安心休息</h2>
+              <p>
+                自由娱乐按实际使用时长结算。吃饭、睡眠、散步和必要休息不需要从余额中扣除。
+              </p>
+              <div className="leisure-balance-card">
+                <span>当前可用时间</span>
+                <strong>{formatBalance(balanceSeconds)}</strong>
+                <small>余额用完后不会产生负债，只记录超出预算的时间。</small>
+              </div>
+            </div>
+            <img
+              src="/assets/illustrations/time-bank-trainee-resting.png"
+              alt=""
+              aria-hidden="true"
+              draggable="false"
+            />
+          </section>
+
+          <section className="leisure-start-panel" aria-label="开始自由时间">
+            <div className="panel-heading">
+              <div>
+                <span className="status-label" data-status="idle">
+                  <span className="status-dot" />
+                  等待开始
+                </span>
+                <h2>这次准备怎样放松？</h2>
+              </div>
+              <WalletCards aria-hidden="true" size={20} />
+            </div>
+
+            <form className="leisure-form" onSubmit={submit}>
+              <label htmlFor="leisure-activity">自由活动</label>
+              <input
+                id="leisure-activity"
+                value={activity}
+                maxLength={80}
+                autoComplete="off"
+                placeholder="例如：玩一会儿游戏"
+                onChange={(event) => setActivity(event.target.value)}
+              />
+              <div className="leisure-presets" aria-label="常用自由活动">
+                {[
+                  '玩一会儿游戏',
+                  '看一集喜欢的剧',
+                  '听音乐放空',
+                  '随便逛逛',
+                ].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    data-active={activity === item}
+                    onClick={() => setActivity(item)}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+              <label htmlFor="leisure-minutes">本次预算</label>
+              <div className="leisure-budget-row">
+                <input
+                  id="leisure-minutes"
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={plannedMinutes}
+                  onChange={(event) => setPlannedMinutes(event.target.value)}
+                />
+                <span>分钟</span>
+                {[15, 30, 60].map((minutes) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    data-active={plannedMinutes === String(minutes)}
+                    onClick={() => setPlannedMinutes(String(minutes))}
+                  >
+                    {minutes} 分钟
+                  </button>
+                ))}
+              </div>
+              {activeStudySession && (
+                <p className="leisure-blocked-note">
+                  <AlertCircle aria-hidden="true" size={15} />
+                  当前正在学习计时，请先完成或暂停学习。
+                </p>
+              )}
+              <button
+                className="primary-action leisure-start-action"
+                type="submit"
+                disabled={
+                  submitting ||
+                  Boolean(activeStudySession) ||
+                  balanceSeconds <= 0 ||
+                  !activity.trim() ||
+                  Number(plannedMinutes) <= 0
+                }
+                aria-busy={submitting}
+              >
+                {submitting ? (
+                  <LoaderCircle aria-hidden="true" className="spin" size={18} />
+                ) : (
+                  <Coffee aria-hidden="true" size={18} />
+                )}
+                开始自由时间
+              </button>
+            </form>
+            <p className="leisure-privacy-note">
+              <ShieldCheck aria-hidden="true" size={15} />
+              自由时间不会采集窗口标题或截图，只保存活动名称与时长。
+            </p>
+          </section>
+        </div>
+      ) : (
+        <div className="leisure-active-layout">
+          <section
+            className="leisure-active-panel"
+            data-status={session.status}
+            aria-labelledby="active-leisure-title"
+          >
+            <div className="panel-heading">
+              <div>
+                <span className="status-label" data-status={session.status}>
+                  <span className="status-dot" />
+                  {session.status === 'running' ? '正在使用' : '已经暂停'}
+                </span>
+                <h2 id="active-leisure-title">{session.activity}</h2>
+              </div>
+              <span className="session-count">
+                预算 {formatCompactDuration(session.plannedSeconds)}
+              </span>
+            </div>
+
+            <div className="leisure-timer-stage">
+              <img
+                src="/assets/illustrations/time-bank-trainee-resting.png"
+                alt=""
+                aria-hidden="true"
+                draggable="false"
+              />
+              <div>
+                <span>已经放松</span>
+                <strong>{formatClock(elapsedSeconds)}</strong>
+                <p>
+                  {overBudget > 0
+                    ? `已超过本次预算 ${formatCompactDuration(overBudget)}`
+                    : `预算内还剩 ${formatCompactDuration(plannedRemaining)}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="leisure-progress" aria-label="自由时间预算进度">
+              <span style={{ width: `${progress}%` }} />
+            </div>
+
+            <div className="leisure-live-metrics">
+              <div>
+                <span>预计使用</span>
+                <strong>{formatBalance(projectedCharge)}</strong>
+              </div>
+              <div data-empty={projectedBalance === 0}>
+                <span>预计剩余</span>
+                <strong>{formatBalance(projectedBalance)}</strong>
+              </div>
+              <div>
+                <span>计费规则</span>
+                <strong>1 : 1</strong>
+              </div>
+            </div>
+
+            <div className="leisure-active-actions">
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={submitting}
+                onClick={() => void toggle()}
+              >
+                {session.status === 'running' ? (
+                  <Pause aria-hidden="true" size={17} />
+                ) : (
+                  <Play aria-hidden="true" size={17} />
+                )}
+                {session.status === 'running' ? '暂停' : '继续'}
+              </button>
+              <button
+                className="primary-action"
+                type="button"
+                disabled={submitting || elapsedSeconds < 1}
+                onClick={() => void settle()}
+              >
+                {submitting ? (
+                  <LoaderCircle aria-hidden="true" className="spin" size={17} />
+                ) : (
+                  <Square aria-hidden="true" size={16} />
+                )}
+                结束并结算
+              </button>
+            </div>
+          </section>
+
+          <aside className="leisure-note-panel">
+            <Coffee aria-hidden="true" size={22} />
+            <h2>给这段自由时间留句话</h2>
+            <p>可选。结束后会和消费记录一起保存在本机。</p>
+            <textarea
+              value={completionNote}
+              maxLength={200}
+              placeholder="例如：玩了一局，感觉已经放松好了"
+              onChange={(event) => setCompletionNote(event.target.value)}
+            />
+            <div className="leisure-soft-limit">
+              <ShieldCheck aria-hidden="true" size={16} />
+              <span>
+                余额不足时最多扣到 0，不会产生时间负债，也不会强制关闭其他软件。
+              </span>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {receipt && (
+        <LeisureReceiptDialog
+          session={receipt.completedSession}
+          balanceSeconds={receipt.state.balanceSeconds}
+          onClose={dismissReceipt}
+        />
+      )}
+    </>
+  )
+}
+
+function LeisureReceiptDialog({
+  session,
+  balanceSeconds,
+  onClose,
+}: {
+  session: LeisureSession
+  balanceSeconds: number
+  onClose(): void
+}) {
+  const unchargedSeconds = Math.max(
+    0,
+    session.effectiveDurationSeconds - session.chargedSeconds,
+  )
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="dialog receipt-dialog leisure-receipt"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="leisure-receipt-title"
+      >
+        <img
+          className="receipt-illustration"
+          src="/assets/illustrations/time-bank-trainee-resting.png"
+          alt=""
+          aria-hidden="true"
+          draggable="false"
+        />
+        <span className="receipt-kicker">自由时间已结算</span>
+        <h2 id="leisure-receipt-title">
+          − {formatBalance(session.chargedSeconds)}
+        </h2>
+        <p>{session.activity}</p>
+        <div className="receipt-balance leisure-receipt-grid">
+          <span>实际放松</span>
+          <strong>{formatBalance(session.effectiveDurationSeconds)}</strong>
+          {unchargedSeconds > 0 && (
+            <small>其中 {formatBalance(unchargedSeconds)} 未计费</small>
+          )}
+        </div>
+        <div className="receipt-balance">
+          <span>账户可用时间</span>
+          <strong>{formatBalance(balanceSeconds)}</strong>
+        </div>
+        <button className="primary-action" type="button" onClick={onClose}>
+          <Check aria-hidden="true" size={18} />
+          收好凭证
+        </button>
+      </section>
+    </div>
+  )
+}
+
+type AutomaticPlanItem = {
+  id: string
+  task: PlanningTask
+  startsAtUtc: string
+  plannedMinutes: number
+  reason: string
+}
+
+type PlannerPreferences = {
+  availableMinutes: number
+  preferredBlockMinutes: number
+  latestEndTime: string
+}
+
+const plannerPreferencesKey = 'timebet.planner-preferences'
+const defaultPlannerPreferences: PlannerPreferences = {
+  availableMinutes: 180,
+  preferredBlockMinutes: 45,
+  latestEndTime: '22:30',
+}
+
+function TodayCommandCenter({
+  tasks,
+  plan,
+  state,
+  elapsedSeconds,
+  loading,
+  arranging,
+  submitting,
+  onArrange,
+  onStartTask,
+  onStartBlock,
+  onToggleSession,
+  onFinishSession,
+}: {
+  tasks: PlanningTask[]
+  plan: TodayPlan | null
+  state: ReturnType<typeof useSessionStore.getState>['state']
+  elapsedSeconds: number
+  loading: boolean
+  arranging: boolean
+  submitting: boolean
+  onArrange(): Promise<void>
+  onStartTask(task: PlanningTask): Promise<void>
+  onStartBlock(block: PlanningTimeBlock): Promise<void>
+  onToggleSession(): Promise<void>
+  onFinishSession(): void
+}) {
+  const [review, setReview] = useState<DailyReview | null>(null)
+  const [reviewLoading, setReviewLoading] = useState(true)
+  const session = state?.session ?? null
+
+  useEffect(() => {
+    let active = true
+    setReviewLoading(true)
+    void callBridge<DailyReview>('review.today.get')
+      .then((value) => {
+        if (active) setReview(value)
+      })
+      .catch(() => {
+        if (active) setReview(null)
+      })
+      .finally(() => {
+        if (active) setReviewLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const plannedBlocks = (plan?.blocks ?? [])
+    .filter((block) => block.status === 'planned')
+    .sort(
+      (left, right) =>
+        new Date(left.startsAtUtc).getTime() -
+        new Date(right.startsAtUtc).getTime(),
+    )
+  const nextBlock = plannedBlocks[0] ?? null
+  const orderedTasks = [...tasks].sort(compareTasksForPlanning)
+  const nextTask = orderedTasks[0] ?? null
+  const primaryTitle = session?.goal ?? nextBlock?.taskTitle ?? nextTask?.title
+  const primaryDuration = session
+    ? elapsedSeconds
+    : (nextBlock?.plannedSeconds ??
+      Math.min(nextTask?.estimatedSeconds ?? 25 * 60, 60 * 60))
+  const focusCount = plannedBlocks.length || Math.min(orderedTasks.length, 3)
+  const completedCount = plan?.completedCount ?? 0
+  const totalBlocks = plan?.blocks.length ?? 0
+  const allocation = buildTodayAllocation(plan)
+  const allocationTotal = allocation.reduce(
+    (sum, item) => sum + item.seconds,
+    0,
+  )
+  const planIsEmpty = plannedBlocks.length === 0
+  const managerTitle = reviewLoading
+    ? '正在整理今天的建议'
+    : review?.headline ||
+      (planIsEmpty ? '先把最重要的任务放进时间里' : '今天的路线已经清楚了')
+  const managerDetail = reviewLoading
+    ? '任务、排程和历史投入会在这里合并成一条行动建议。'
+    : review?.narrative ||
+      (planIsEmpty
+        ? '点击一键安排，系统会优先处理临近截止且尚未排程的任务。'
+        : `已有 ${plannedBlocks.length} 个待执行时间块，先完成最靠前的一项。`)
+
+  const startPrimary = () => {
+    if (session) return Promise.resolve()
+    if (nextBlock) return onStartBlock(nextBlock)
+    if (nextTask) return onStartTask(nextTask)
+    return Promise.resolve()
+  }
+
+  return (
+    <section
+      className="today-command-center"
+      aria-labelledby="today-command-title"
+    >
+      <div className="today-command-heading">
+        <div>
+          <span>今日行动台</span>
+          <h2 id="today-command-title">
+            {session
+              ? '当前专注正在进行'
+              : focusCount > 0
+                ? `今天只需要完成 ${focusCount} 件事`
+                : '先确定今天最重要的一件事'}
+          </h2>
+          <p>
+            {session
+              ? '完成当前时间块后，任务进度和剩余安排会自动更新。'
+              : '任务、排程、计时和复盘已经合并到同一条行动路线。'}
+          </p>
+        </div>
+        <button
+          className="primary-action auto-plan-action"
+          type="button"
+          disabled={
+            loading || arranging || Boolean(session) || tasks.length === 0
+          }
+          aria-busy={arranging}
+          onClick={() => void onArrange()}
+        >
+          {arranging ? (
+            <LoaderCircle aria-hidden="true" className="spin" size={17} />
+          ) : (
+            <Sparkles aria-hidden="true" size={17} />
+          )}
+          {arranging ? '正在安排' : '一键安排今天'}
+        </button>
+      </div>
+
+      <div className="today-command-grid">
+        <div className="today-command-main">
+          <section className="next-action-card" data-active={Boolean(session)}>
+            <div>
+              <span>{session ? '正在进行' : '现在最值得做'}</span>
+              <h3>{primaryTitle ?? '还没有待办任务'}</h3>
+              <p>
+                {session
+                  ? `已专注 ${formatCompactDuration(elapsedSeconds)}`
+                  : nextBlock
+                    ? `${formatTime(nextBlock.startsAtUtc)} 开始 · 计划 ${formatCompactDuration(nextBlock.plannedSeconds)}`
+                    : nextTask
+                      ? `${nextTask.dueDate ? formatDueDate(nextTask.dueDate) : '尚未设置截止日期'} · 建议先投入 ${formatCompactDuration(primaryDuration)}`
+                      : '从下方“管理任务与时间块”添加第一项任务。'}
+              </p>
+            </div>
+            {session ? (
+              <div className="next-action-controls">
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void onToggleSession()}
+                >
+                  {session.status === 'running' ? (
+                    <Pause aria-hidden="true" size={16} />
+                  ) : (
+                    <Play aria-hidden="true" size={16} />
+                  )}
+                  {session.status === 'running' ? '暂停' : '继续'}
+                </button>
+                <button
+                  className="primary-action"
+                  type="button"
+                  disabled={submitting || elapsedSeconds < 1}
+                  onClick={onFinishSession}
+                >
+                  <Square aria-hidden="true" size={15} />
+                  完成并存入
+                </button>
+              </div>
+            ) : (
+              <button
+                className="primary-action"
+                type="button"
+                disabled={!primaryTitle}
+                onClick={() => void startPrimary()}
+              >
+                <Play aria-hidden="true" size={17} />
+                开始专注
+              </button>
+            )}
+          </section>
+
+          <section className="today-overview-card">
+            <div className="today-card-heading">
+              <div>
+                <span>时间分配</span>
+                <h3>今天的时间怎么花</h3>
+              </div>
+              <strong>
+                {plan?.plannedSeconds
+                  ? `计划 ${formatBalance(plan.plannedSeconds)}`
+                  : '等待安排'}
+              </strong>
+            </div>
+            {allocation.length > 0 ? (
+              <>
+                <div
+                  className="today-allocation-bar"
+                  aria-label="今日任务时间分配"
+                >
+                  {allocation.map((item, index) => (
+                    <span
+                      key={item.taskId}
+                      data-series={index % 4}
+                      style={{
+                        width: `${Math.max(4, (item.seconds / allocationTotal) * 100)}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="today-allocation-legend">
+                  {allocation.slice(0, 4).map((item, index) => (
+                    <div key={item.taskId}>
+                      <i data-series={index % 4} />
+                      <span>{item.title}</span>
+                      <strong>{formatCompactDuration(item.seconds)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="today-command-empty">
+                一键安排后，这里会直接显示每项任务占用多少时间。
+              </div>
+            )}
+          </section>
+
+          <section className="today-overview-card">
+            <div className="today-card-heading">
+              <div>
+                <span>任务进程</span>
+                <h3>离完成还有多远</h3>
+              </div>
+              <strong>
+                {totalBlocks > 0
+                  ? `${completedCount}/${totalBlocks} 个时间块`
+                  : `${tasks.length} 项待办`}
+              </strong>
+            </div>
+            {orderedTasks.length > 0 ? (
+              <div className="today-progress-list">
+                {orderedTasks.slice(0, 3).map((task) => {
+                  const milestones = taskMilestones(task)
+                  const completedMilestones = milestones.filter(
+                    (milestone) => milestone.isCompleted,
+                  ).length
+                  const percentage =
+                    milestones.length > 0
+                      ? Math.round(
+                          (completedMilestones / milestones.length) * 100,
+                        )
+                      : task.estimatedSeconds
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              (task.actualSeconds / task.estimatedSeconds) *
+                                100,
+                            ),
+                          )
+                        : 0
+                  const remaining = task.estimatedSeconds
+                    ? Math.max(0, task.estimatedSeconds - task.actualSeconds)
+                    : null
+                  return (
+                    <div className="today-progress-item" key={task.id}>
+                      <div>
+                        <strong>{task.title}</strong>
+                        <span>
+                          {milestones.length > 0 || task.estimatedSeconds
+                            ? `${percentage}%`
+                            : '待拆解'}
+                        </span>
+                      </div>
+                      <div className="today-progress-track">
+                        <span style={{ width: `${percentage}%` }} />
+                      </div>
+                      <small>
+                        {milestones.length > 0
+                          ? `完成 ${completedMilestones}/${milestones.length} 个阶段`
+                          : remaining === null
+                            ? task.actualSeconds > 0
+                              ? `已投入 ${formatCompactDuration(task.actualSeconds)}`
+                              : '添加阶段后可显示真实完成进度'
+                            : remaining > 0
+                              ? `预计还需 ${formatCompactDuration(remaining)}`
+                              : '已达到预计投入'}
+                        {task.dueDate
+                          ? ` · ${formatDueDate(task.dueDate)}`
+                          : ''}
+                      </small>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="today-command-empty">
+                创建任务后，进度会集中显示在这里。
+              </div>
+            )}
+          </section>
+        </div>
+
+        <aside className="today-command-side">
+          <section
+            className="today-manager-card"
+            data-source={review?.source ?? 'local'}
+          >
+            <div className="today-manager-mark">
+              <Sparkles aria-hidden="true" size={18} />
+            </div>
+            <div>
+              <span>
+                {review?.source === 'ai' ? 'AI 今日管家' : '今日智能管家'}
+              </span>
+              <h3>{managerTitle}</h3>
+              <p>{managerDetail}</p>
+            </div>
+            {review?.suggestions[0] && (
+              <div className="today-manager-suggestion">
+                {review.suggestions[0]}
+              </div>
+            )}
+            <button
+              className="primary-action"
+              type="button"
+              disabled={
+                loading || arranging || Boolean(session) || tasks.length === 0
+              }
+              onClick={() => void onArrange()}
+            >
+              <Sparkles aria-hidden="true" size={16} />
+              {planIsEmpty ? '按建议自动安排' : '重新补齐空档'}
+            </button>
+          </section>
+
+          <section className="today-agenda-card">
+            <div className="today-card-heading">
+              <div>
+                <span>接下来</span>
+                <h3>今日行动路线</h3>
+              </div>
+              <strong>{plannedBlocks.length} 个待执行</strong>
+            </div>
+            {plannedBlocks.length > 0 ? (
+              <div className="today-agenda-list">
+                {plannedBlocks.slice(0, 4).map((block, index) => (
+                  <div className="today-agenda-item" key={block.id}>
+                    <time>{formatTime(block.startsAtUtc)}</time>
+                    <i data-current={index === 0} />
+                    <div>
+                      <strong>{block.taskTitle}</strong>
+                      <span>{formatCompactDuration(block.plannedSeconds)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="today-command-empty">
+                暂无时间块，系统可从待办中自动挑选最多 3 项。
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
+    </section>
+  )
+}
+
+function buildTodayAllocation(plan: TodayPlan | null) {
+  const grouped = new Map<
+    string,
+    { taskId: string; title: string; seconds: number }
+  >()
+  for (const block of plan?.blocks ?? []) {
+    if (block.status === 'skipped') continue
+    const current = grouped.get(block.taskId)
+    grouped.set(block.taskId, {
+      taskId: block.taskId,
+      title: block.taskTitle,
+      seconds: (current?.seconds ?? 0) + block.plannedSeconds,
+    })
+  }
+  return [...grouped.values()].sort(
+    (left, right) => right.seconds - left.seconds,
+  )
+}
+
+function compareTasksForPlanning(left: PlanningTask, right: PlanningTask) {
+  if (left.dueDate && right.dueDate) {
+    const dueOrder = left.dueDate.localeCompare(right.dueDate)
+    if (dueOrder !== 0) return dueOrder
+  } else if (left.dueDate) {
+    return -1
+  } else if (right.dueDate) {
+    return 1
+  }
+  const leftRemaining = Math.max(
+    0,
+    (left.estimatedSeconds ?? 25 * 60) - left.actualSeconds,
+  )
+  const rightRemaining = Math.max(
+    0,
+    (right.estimatedSeconds ?? 25 * 60) - right.actualSeconds,
+  )
+  return rightRemaining - leftRemaining
+}
+
+function taskMilestones(task: PlanningTask) {
+  return task.milestones ?? []
+}
+
+function buildAutomaticTodayPlan(
+  tasks: PlanningTask[],
+  plan: TodayPlan,
+  preferences: PlannerPreferences,
+): AutomaticPlanItem[] {
+  const scheduledTaskIds = new Set(
+    plan.blocks
+      .filter((block) => block.status === 'planned')
+      .map((block) => block.taskId),
+  )
+  const occupied = plan.blocks
+    .filter((block) => block.status === 'planned')
+    .map((block) => {
+      const start = new Date(block.startsAtUtc).getTime()
+      return { start, end: start + block.plannedSeconds * 1000 }
+    })
+    .sort((left, right) => left.start - right.start)
+  const now = new Date()
+  const roundedNow = new Date(now)
+  roundedNow.setSeconds(0, 0)
+  roundedNow.setMinutes(Math.ceil(roundedNow.getMinutes() / 15) * 15)
+  const startBoundary = Math.max(
+    roundedNow.getTime(),
+    new Date(plan.dayStartedAtUtc).getTime(),
+  )
+  const preferredMinutes = Math.max(
+    15,
+    Math.min(120, preferences.preferredBlockMinutes),
+  )
+  const configuredEnd = new Date(
+    `${plan.date}T${preferences.latestEndTime}:00`,
+  ).getTime()
+  const endBoundary = Math.min(
+    new Date(plan.dayEndedAtUtc).getTime(),
+    Number.isNaN(configuredEnd)
+      ? new Date(plan.dayEndedAtUtc).getTime()
+      : configuredEnd,
+  )
+  const alreadyPlannedMinutes = Math.ceil(
+    plan.blocks
+      .filter((block) => block.status === 'planned')
+      .reduce((sum, block) => sum + block.plannedSeconds, 0) / 60,
+  )
+  let availableMinutes = Math.max(
+    0,
+    preferences.availableMinutes - alreadyPlannedMinutes,
+  )
+  let cursor = startBoundary
+  const result: AutomaticPlanItem[] = []
+
+  for (const task of [...tasks].sort(compareTasksForPlanning)) {
+    if (
+      scheduledTaskIds.has(task.id) ||
+      result.length >= 3 ||
+      availableMinutes < 15
+    ) {
+      continue
+    }
+    const remainingSeconds = Math.max(
+      15 * 60,
+      (task.estimatedSeconds ?? 25 * 60) - task.actualSeconds,
+    )
+    const roundedRemainingMinutes =
+      Math.ceil(remainingSeconds / (15 * 60)) * 15
+    const plannedMinutes = Math.min(
+      preferredMinutes,
+      Math.floor(availableMinutes / 15) * 15,
+      Math.max(15, roundedRemainingMinutes),
+    )
+    const durationMs = plannedMinutes * 60 * 1000
+
+    for (const interval of occupied) {
+      if (cursor + durationMs <= interval.start) break
+      if (cursor < interval.end) cursor = interval.end + 15 * 60 * 1000
+    }
+    if (cursor + durationMs > endBoundary) break
+
+    result.push({
+      id: crypto.randomUUID(),
+      task,
+      startsAtUtc: new Date(cursor).toISOString(),
+      plannedMinutes,
+      reason: task.dueDate
+        ? `${formatDueDate(task.dueDate)}，优先推进剩余工作`
+        : '按剩余工作量排序，填入最近空档',
+    })
+    availableMinutes -= plannedMinutes
+    occupied.push({ start: cursor, end: cursor + durationMs })
+    occupied.sort((left, right) => left.start - right.start)
+    cursor += durationMs + 15 * 60 * 1000
+  }
+
+  return result
+}
+
+function loadPlannerPreferences(): PlannerPreferences {
+  try {
+    const value = window.localStorage.getItem(plannerPreferencesKey)
+    if (!value) return defaultPlannerPreferences
+    const parsed = JSON.parse(value) as Partial<PlannerPreferences>
+    return {
+      availableMinutes:
+        typeof parsed.availableMinutes === 'number'
+          ? Math.max(30, Math.min(720, parsed.availableMinutes))
+          : defaultPlannerPreferences.availableMinutes,
+      preferredBlockMinutes:
+        typeof parsed.preferredBlockMinutes === 'number'
+          ? Math.max(15, Math.min(120, parsed.preferredBlockMinutes))
+          : defaultPlannerPreferences.preferredBlockMinutes,
+      latestEndTime:
+        typeof parsed.latestEndTime === 'string'
+          ? parsed.latestEndTime
+          : defaultPlannerPreferences.latestEndTime,
+    }
+  } catch {
+    return defaultPlannerPreferences
+  }
+}
+
+function PlanDraftDialog({
+  date,
+  preferences,
+  items,
+  applying,
+  onPreferencesChange,
+  onRegenerate,
+  onUpdate,
+  onRemove,
+  onApply,
+  onClose,
+}: {
+  date: string
+  preferences: PlannerPreferences
+  items: AutomaticPlanItem[]
+  applying: boolean
+  onPreferencesChange(preferences: PlannerPreferences): void
+  onRegenerate(): void
+  onUpdate(id: string, changes: Partial<AutomaticPlanItem>): void
+  onRemove(id: string): void
+  onApply(): Promise<void>
+  onClose(): void
+}) {
+  const totalMinutes = items.reduce(
+    (sum, item) => sum + item.plannedMinutes,
+    0,
+  )
+
+  return (
+    <div className="modal-backdrop plan-draft-backdrop" role="presentation">
+      <section
+        className="dialog plan-draft-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="plan-draft-title"
+      >
+        <div className="plan-draft-heading">
+          <div>
+            <span>智能排程草稿</span>
+            <h2 id="plan-draft-title">先预览，再一键应用</h2>
+            <p>按截止日期、剩余工作量和已有时间块生成，所有内容都可修改。</p>
+          </div>
+          <button
+            className="dialog-close"
+            type="button"
+            aria-label="关闭排程草稿"
+            disabled={applying}
+            onClick={onClose}
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
+
+        <div className="plan-preferences">
+          <label>
+            今日最多投入
+            <span>
+              <input
+                type="number"
+                min="30"
+                max="720"
+                step="15"
+                value={preferences.availableMinutes}
+                onChange={(event) =>
+                  onPreferencesChange({
+                    ...preferences,
+                    availableMinutes: Math.max(
+                      30,
+                      Number(event.target.value) || 30,
+                    ),
+                  })
+                }
+              />
+              分钟
+            </span>
+          </label>
+          <label>
+            单段专注
+            <span>
+              <select
+                value={preferences.preferredBlockMinutes}
+                onChange={(event) =>
+                  onPreferencesChange({
+                    ...preferences,
+                    preferredBlockMinutes: Number(event.target.value),
+                  })
+                }
+              >
+                <option value="25">25 分钟</option>
+                <option value="45">45 分钟</option>
+                <option value="60">60 分钟</option>
+                <option value="90">90 分钟</option>
+              </select>
+            </span>
+          </label>
+          <label>
+            最晚结束
+            <span>
+              <input
+                type="time"
+                value={preferences.latestEndTime}
+                onChange={(event) =>
+                  onPreferencesChange({
+                    ...preferences,
+                    latestEndTime: event.target.value,
+                  })
+                }
+              />
+            </span>
+          </label>
+          <button
+            className="secondary-action plan-regenerate"
+            type="button"
+            disabled={applying}
+            onClick={onRegenerate}
+          >
+            <RefreshCw aria-hidden="true" size={15} />
+            重新生成
+          </button>
+        </div>
+
+        <div className="plan-draft-summary">
+          <span>建议 {items.length} 个时间块</span>
+          <strong>新增 {formatCompactDuration(totalMinutes * 60)}</strong>
+        </div>
+
+        {items.length > 0 ? (
+          <div className="plan-draft-list">
+            {items.map((item, index) => (
+              <article className="plan-draft-item" key={item.id}>
+                <span className="plan-draft-order">{index + 1}</span>
+                <div className="plan-draft-copy">
+                  <strong>{item.task.title}</strong>
+                  <span>{item.reason}</span>
+                </div>
+                <label>
+                  开始
+                  <input
+                    aria-label={`${item.task.title}开始时间`}
+                    type="time"
+                    value={formatTimeInput(item.startsAtUtc)}
+                    onChange={(event) => {
+                      const startsAt = new Date(
+                        `${date}T${event.target.value}:00`,
+                      )
+                      if (!Number.isNaN(startsAt.getTime())) {
+                        onUpdate(item.id, {
+                          startsAtUtc: startsAt.toISOString(),
+                        })
+                      }
+                    }}
+                  />
+                </label>
+                <label>
+                  时长
+                  <span>
+                    <input
+                      aria-label={`${item.task.title}计划分钟`}
+                      type="number"
+                      min="15"
+                      max="480"
+                      step="5"
+                      value={item.plannedMinutes}
+                      onChange={(event) =>
+                        onUpdate(item.id, {
+                          plannedMinutes: Math.max(
+                            15,
+                            Number(event.target.value) || 15,
+                          ),
+                        })
+                      }
+                    />
+                    分
+                  </span>
+                </label>
+                <button
+                  className="plan-draft-remove"
+                  type="button"
+                  aria-label={`移除${item.task.title}`}
+                  disabled={applying}
+                  onClick={() => onRemove(item.id)}
+                >
+                  <X aria-hidden="true" size={16} />
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="plan-draft-empty">
+            当前偏好下没有可用空档。可以延后最晚结束时间，或增加今日可用分钟。
+          </div>
+        )}
+
+        <div className="plan-draft-actions">
+          <span>应用后仍可立即撤销本次新增的时间块。</span>
+          <button
+            className="secondary-action"
+            type="button"
+            disabled={applying}
+            onClick={onClose}
+          >
+            取消
+          </button>
+          <button
+            className="primary-action"
+            type="button"
+            disabled={applying || items.length === 0}
+            onClick={() => void onApply()}
+          >
+            {applying ? (
+              <LoaderCircle aria-hidden="true" className="spin" size={16} />
+            ) : (
+              <Check aria-hidden="true" size={16} />
+            )}
+            {applying ? '正在应用' : `应用全部 ${items.length} 项`}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function FocusView() {
   const { showFeedback } = useFeedback()
   const {
@@ -2511,6 +3665,8 @@ function FocusView() {
     load: loadTasks,
     create: createTask,
     setCompleted,
+    addMilestone,
+    setMilestoneCompleted,
     clearError: clearTaskError,
   } = useTaskStore()
   const {
@@ -2521,6 +3677,7 @@ function FocusView() {
     load: loadPlanner,
     create: createTimeBlock,
     skip: skipTimeBlock,
+    remove: removeTimeBlock,
     clearError: clearPlannerError,
   } = usePlannerStore()
   const trackingOverview = useTimelineStore((store) => store.overview)
@@ -2532,6 +3689,12 @@ function FocusView() {
   const [goal, setGoal] = useState('')
   const [captureScreenshots, setCaptureScreenshots] = useState(false)
   const [showFinish, setShowFinish] = useState(false)
+  const [plannerPreferences, setPlannerPreferences] =
+    useState<PlannerPreferences>(loadPlannerPreferences)
+  const [planDraft, setPlanDraft] = useState<AutomaticPlanItem[]>([])
+  const [planDraftOpen, setPlanDraftOpen] = useState(false)
+  const [planDraftApplying, setPlanDraftApplying] = useState(false)
+  const [managementOpen, setManagementOpen] = useState(false)
   const session = state?.session ?? null
   const focusStatus = session?.status ?? 'idle'
   const focusCharacterAsset = getFocusCharacterAsset(focusStatus)
@@ -2559,6 +3722,13 @@ function FocusView() {
   useEffect(() => {
     void loadPlanner()
   }, [loadPlanner])
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      plannerPreferencesKey,
+      JSON.stringify(plannerPreferences),
+    )
+  }, [plannerPreferences])
 
   useEffect(() => {
     if (receipt) {
@@ -2594,6 +3764,98 @@ function FocusView() {
     }
   }
 
+  const startTask = async (task: PlanningTask) => {
+    if (session) return
+    const ok = await start(task.title, captureScreenshots, task.id)
+    if (ok) {
+      showFeedback({
+        tone: 'success',
+        title: '从任务开始专注',
+        detail: task.title,
+      })
+    }
+  }
+
+  const startBlock = async (block: PlanningTimeBlock) => {
+    if (session) return
+    const ok = await start(
+      block.taskTitle,
+      captureScreenshots,
+      block.taskId,
+      block.id,
+    )
+    if (ok) {
+      showFeedback({
+        tone: 'success',
+        title: '计划时间块已开始',
+        detail: block.taskTitle,
+      })
+    }
+  }
+
+  const regeneratePlanDraft = () => {
+    if (!todayPlan) return
+    setPlanDraft(
+      buildAutomaticTodayPlan(tasks, todayPlan, plannerPreferences),
+    )
+  }
+
+  const autoArrangeToday = async () => {
+    if (!todayPlan || session || planDraftApplying) return
+    setPlanDraft(
+      buildAutomaticTodayPlan(tasks, todayPlan, plannerPreferences),
+    )
+    setPlanDraftOpen(true)
+  }
+
+  const undoAppliedPlan = async (blockIds: string[]) => {
+    let removed = 0
+    for (const id of blockIds) {
+      if (await removeTimeBlock(id)) removed += 1
+    }
+    showFeedback({
+      tone: removed === blockIds.length ? 'success' : 'info',
+      title:
+        removed === blockIds.length
+          ? '本次排程已撤销'
+          : `已撤销 ${removed}/${blockIds.length} 个时间块`,
+      detail:
+        removed === blockIds.length
+          ? '仅删除了刚刚新增且尚未开始的时间块。'
+          : '已开始或状态发生变化的时间块会被保留。',
+    })
+  }
+
+  const applyPlanDraft = async () => {
+    if (planDraftApplying || planDraft.length === 0) return
+    setPlanDraftApplying(true)
+    const createdBlockIds: string[] = []
+    for (const suggestion of planDraft) {
+      const block = await createTimeBlock(
+        suggestion.task.id,
+        suggestion.startsAtUtc,
+        suggestion.plannedMinutes,
+      )
+      if (block) createdBlockIds.push(block.id)
+    }
+    setPlanDraftApplying(false)
+    if (createdBlockIds.length > 0) {
+      setPlanDraftOpen(false)
+      showFeedback({
+        tone: 'success',
+        title: `已应用 ${createdBlockIds.length} 个时间块`,
+        detail:
+          createdBlockIds.length === planDraft.length
+            ? '今日行动路线已经更新。'
+            : `其中 ${planDraft.length - createdBlockIds.length} 项因时间冲突未能加入。`,
+        action: {
+          label: '撤销本次排程',
+          onSelect: () => void undoAppliedPlan(createdBlockIds),
+        },
+      })
+    }
+  }
+
   return (
     <>
       {error && (
@@ -2606,283 +3868,336 @@ function FocusView() {
         </div>
       )}
 
-      <TodayTasksPanel
+      <TodayCommandCenter
         tasks={tasks}
-        loading={tasksLoading}
-        saving={tasksSaving}
-        error={tasksError}
         plan={todayPlan}
-        plannerLoading={plannerLoading}
-        plannerSaving={plannerSaving}
-        plannerError={plannerError}
-        hasActiveSession={Boolean(session)}
-        activeTaskId={session?.taskId ?? null}
-        onCreate={async (title, estimatedMinutes, dueDate) => {
-          await createTask(title, estimatedMinutes, dueDate)
-        }}
-        onStart={async (task) => {
-          if (session) return
-          const ok = await start(task.title, captureScreenshots, task.id)
-          if (ok) {
-            showFeedback({
-              tone: 'success',
-              title: '\u4ece\u4efb\u52a1\u5f00\u59cb\u4e13\u6ce8',
-              detail: task.title,
-            })
-          }
-        }}
-        onComplete={(task) => void setCompleted(task.id, true)}
-        onSchedule={async (task, startsAtUtc, plannedMinutes) => {
-          const block = await createTimeBlock(
-            task.id,
-            startsAtUtc,
-            plannedMinutes,
-          )
-          if (block) {
-            showFeedback({
-              tone: 'success',
-              title: '时间块已安排',
-              detail: `${task.title} · ${plannedMinutes} 分钟`,
-            })
-          }
-        }}
-        onStartBlock={async (block) => {
-          if (session) return
-          const ok = await start(
-            block.taskTitle,
-            captureScreenshots,
-            block.taskId,
-            block.id,
-          )
-          if (ok) {
-            showFeedback({
-              tone: 'success',
-              title: '计划时间块已开始',
-              detail: block.taskTitle,
-            })
-          }
-        }}
-        onSkipBlock={(block) => void skipTimeBlock(block.id)}
-        onClearError={clearTaskError}
-        onClearPlannerError={clearPlannerError}
+        state={state}
+        elapsedSeconds={elapsedSeconds}
+        loading={tasksLoading || plannerLoading}
+        arranging={planDraftApplying || plannerSaving}
+        submitting={submitting}
+        onArrange={autoArrangeToday}
+        onStartTask={startTask}
+        onStartBlock={startBlock}
+        onToggleSession={toggleSession}
+        onFinishSession={() => setShowFinish(true)}
       />
 
-      <div className="focus-grid">
-        <section
-          className="focus-panel"
-          data-status={focusStatus}
-          aria-labelledby="focus-title"
-        >
-          <div className="panel-heading">
-            <div>
-              <span
-                className="status-label"
-                data-status={session?.status ?? 'idle'}
-              >
-                <span className="status-dot" />
-                {session?.status === 'running'
-                  ? '正在积累'
-                  : session?.status === 'paused'
-                    ? '已暂停'
-                    : '等待存入'}
-              </span>
-              <h2 id="focus-title">
-                {session?.goal ?? '今天的下一笔时间存款'}
-              </h2>
-            </div>
-            <span className="session-count">
-              {session ? '本次专注中' : '准备好再开始'}
+      <details
+        className="today-management"
+        open={managementOpen}
+        onToggle={(event) => setManagementOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <span>
+            <CalendarDays aria-hidden="true" size={17} />
+            管理任务与时间块
+          </span>
+          <span>
+            {tasks.length} 项待办
+            <ChevronDown aria-hidden="true" size={16} />
+          </span>
+        </summary>
+        <TodayTasksPanel
+          tasks={tasks}
+          loading={tasksLoading}
+          saving={tasksSaving}
+          error={tasksError}
+          plan={todayPlan}
+          plannerLoading={plannerLoading}
+          plannerSaving={plannerSaving}
+          plannerError={plannerError}
+          hasActiveSession={Boolean(session)}
+          activeTaskId={session?.taskId ?? null}
+          onCreate={async (title, estimatedMinutes, dueDate) => {
+            await createTask(title, estimatedMinutes, dueDate)
+          }}
+          onStart={startTask}
+          onComplete={(task) => void setCompleted(task.id, true)}
+          onSchedule={async (task, startsAtUtc, plannedMinutes) => {
+            const block = await createTimeBlock(
+              task.id,
+              startsAtUtc,
+              plannedMinutes,
+            )
+            if (block) {
+              showFeedback({
+                tone: 'success',
+                title: '时间块已安排',
+                detail: `${task.title} · ${plannedMinutes} 分钟`,
+              })
+            }
+          }}
+          onStartBlock={startBlock}
+          onSkipBlock={(block) => void skipTimeBlock(block.id)}
+          onAddMilestone={addMilestone}
+          onSetMilestoneCompleted={setMilestoneCompleted}
+          onClearError={clearTaskError}
+          onClearPlannerError={clearPlannerError}
+        />
+      </details>
+
+      {planDraftOpen && todayPlan && (
+        <PlanDraftDialog
+          date={todayPlan.date}
+          preferences={plannerPreferences}
+          items={planDraft}
+          applying={planDraftApplying}
+          onPreferencesChange={setPlannerPreferences}
+          onRegenerate={regeneratePlanDraft}
+          onUpdate={(id, changes) =>
+            setPlanDraft((current) =>
+              current.map((item) =>
+                item.id === id ? { ...item, ...changes } : item,
+              ),
+            )
+          }
+          onRemove={(id) =>
+            setPlanDraft((current) =>
+              current.filter((item) => item.id !== id),
+            )
+          }
+          onApply={applyPlanDraft}
+          onClose={() => setPlanDraftOpen(false)}
+        />
+      )}
+
+      {session && (
+        <details className="today-management focus-detail">
+          <summary>
+            <span>
+              <MonitorDot aria-hidden="true" size={17} />
+              专注详情与活动关联度
             </span>
-          </div>
-
-          <div className="timer-stage">
-            <div className="timer-value" aria-label="当前计时">
-              {formatClock(elapsedSeconds)}
-            </div>
-
-            {loading ? (
-              <div className="loading-state">
-                <LoaderCircle aria-hidden="true" className="spin" size={18} />
-                正在读取本地记录
-              </div>
-            ) : session ? (
-              <>
-                <p>
-                  {session.status === 'paused'
-                    ? '计时已经暂停，休息结束后继续这笔时间存款。'
-                    : '保持当下的节奏，结束时记下实际完成的内容。'}
-                </p>
-                <div className="session-actions">
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    disabled={submitting}
-                    aria-busy={submitting}
-                    onClick={() => void toggleSession()}
+            <span>
+              {session.status === 'running' ? '计时中' : '已暂停'}
+              <ChevronDown aria-hidden="true" size={16} />
+            </span>
+          </summary>
+          <div className="focus-grid" data-session="active">
+            <section
+              className="focus-panel"
+              data-status={focusStatus}
+              aria-labelledby="focus-title"
+            >
+              <div className="panel-heading">
+                <div>
+                  <span
+                    className="status-label"
+                    data-status={session?.status ?? 'idle'}
                   >
-                    {submitting ? (
-                      <LoaderCircle
-                        aria-hidden="true"
-                        className="spin"
-                        size={17}
-                      />
-                    ) : session.status === 'running' ? (
-                      <Pause aria-hidden="true" size={17} />
-                    ) : (
-                      <Play aria-hidden="true" size={17} />
-                    )}
-                    {session.status === 'running' ? '暂停' : '继续'}
-                  </button>
-                  <button
-                    className="primary-action finish-action"
-                    type="button"
-                    disabled={submitting || elapsedSeconds < 1}
-                    onClick={() => setShowFinish(true)}
-                  >
-                    <Square aria-hidden="true" size={16} />
-                    完成并存入
-                  </button>
-                </div>
-                {session.status === 'running' && (
-                  <TaskRelevanceCard
-                    loading={relevanceLoading}
-                    snapshot={relevance}
-                  />
-                )}
-              </>
-            ) : (
-              <form className="start-form" onSubmit={handleStart}>
-                <label htmlFor="session-goal">这段时间准备推进什么？</label>
-                <div className="goal-input-row">
-                  <input
-                    id="session-goal"
-                    value={goal}
-                    maxLength={120}
-                    autoComplete="off"
-                    placeholder="例如：完成高数极限章节例题"
-                    onChange={(event) => setGoal(event.target.value)}
-                  />
-                  <button
-                    className="primary-action"
-                    type="submit"
-                    disabled={submitting || !goal.trim()}
-                    aria-busy={submitting}
-                  >
-                    {submitting ? (
-                      <LoaderCircle
-                        aria-hidden="true"
-                        className="spin"
-                        size={18}
-                      />
-                    ) : (
-                      <Play aria-hidden="true" size={18} />
-                    )}
-                    开始专注
-                  </button>
-                </div>
-                <div className="capture-disclosure">
-                  <MonitorDot aria-hidden="true" size={15} />
-                  <span>记录前台应用</span>
-                  <strong>
-                    {!trackingOverview
-                      ? '读取中'
-                      : trackingOverview.settings.captureActivity
-                        ? '开启'
-                        : '关闭'}
-                  </strong>
-                  <Camera aria-hidden="true" size={15} />
-                  <span>
-                    {!trackingOverview
-                      ? '截图设置读取中'
-                      : trackingOverview.settings.captureScreenshots
-                        ? `截图每 ${trackingOverview.settings.screenshotIntervalMinutes} 分钟`
-                        : '截图全局关闭'}
+                    <span className="status-dot" />
+                    {session?.status === 'running'
+                      ? '正在积累'
+                      : session?.status === 'paused'
+                        ? '已暂停'
+                        : '等待存入'}
                   </span>
-                  <label className="session-capture-choice">
-                    <input
-                      type="checkbox"
-                      checked={captureScreenshots}
-                      disabled={!trackingOverview?.settings.captureScreenshots}
-                      onChange={(event) =>
-                        setCaptureScreenshots(event.target.checked)
-                      }
-                    />
-                    <span>允许本次截图</span>
-                  </label>
+                  <h2 id="focus-title">
+                    {session?.goal ?? '今天的下一笔时间存款'}
+                  </h2>
                 </div>
-              </form>
-            )}
-          </div>
+                <span className="session-count">
+                  {session ? '本次专注中' : '准备好再开始'}
+                </span>
+              </div>
 
-          <div className="day-track" aria-label="本次学习进度">
-            <div className="track-line">
-              <span
-                className="track-progress"
-                style={{
-                  width: `${Math.min(100, (elapsedSeconds / 3600) * 100)}%`,
-                }}
-              />
-              <span
-                className="track-origin"
-                style={{
-                  left: `${Math.min(100, (elapsedSeconds / 3600) * 100)}%`,
-                }}
-              />
-            </div>
-            <div className="track-labels">
-              <span>开始</span>
-              <span>15 分钟</span>
-              <span>30 分钟</span>
-              <span>60 分钟</span>
-            </div>
-          </div>
-          <div
-            className="focus-character"
-            data-status={focusStatus}
-            data-asset={focusCharacterAsset.key}
-            aria-hidden="true"
-          >
-            <img src={focusCharacterAsset.src} alt="" draggable="false" />
-          </div>
-        </section>
+              <div className="timer-stage">
+                <div className="timer-value" aria-label="当前计时">
+                  {formatClock(elapsedSeconds)}
+                </div>
 
-        <aside className="summary-panel" aria-labelledby="summary-title">
-          <div className="summary-heading">
-            <h2 id="summary-title">时间账户</h2>
-            <WalletCards aria-hidden="true" size={20} />
+                {loading ? (
+                  <div className="loading-state">
+                    <LoaderCircle
+                      aria-hidden="true"
+                      className="spin"
+                      size={18}
+                    />
+                    正在读取本地记录
+                  </div>
+                ) : session ? (
+                  <>
+                    <p>
+                      {session.status === 'paused'
+                        ? '计时已经暂停，休息结束后继续这笔时间存款。'
+                        : '保持当下的节奏，结束时记下实际完成的内容。'}
+                    </p>
+                    <div className="session-actions">
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        disabled={submitting}
+                        aria-busy={submitting}
+                        onClick={() => void toggleSession()}
+                      >
+                        {submitting ? (
+                          <LoaderCircle
+                            aria-hidden="true"
+                            className="spin"
+                            size={17}
+                          />
+                        ) : session.status === 'running' ? (
+                          <Pause aria-hidden="true" size={17} />
+                        ) : (
+                          <Play aria-hidden="true" size={17} />
+                        )}
+                        {session.status === 'running' ? '暂停' : '继续'}
+                      </button>
+                      <button
+                        className="primary-action finish-action"
+                        type="button"
+                        disabled={submitting || elapsedSeconds < 1}
+                        onClick={() => setShowFinish(true)}
+                      >
+                        <Square aria-hidden="true" size={16} />
+                        完成并存入
+                      </button>
+                    </div>
+                    {session.status === 'running' && (
+                      <TaskRelevanceCard
+                        loading={relevanceLoading}
+                        snapshot={relevance}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <form className="start-form" onSubmit={handleStart}>
+                    <label htmlFor="session-goal">这段时间准备推进什么？</label>
+                    <div className="goal-input-row">
+                      <input
+                        id="session-goal"
+                        value={goal}
+                        maxLength={120}
+                        autoComplete="off"
+                        placeholder="例如：完成高数极限章节例题"
+                        onChange={(event) => setGoal(event.target.value)}
+                      />
+                      <button
+                        className="primary-action"
+                        type="submit"
+                        disabled={submitting || !goal.trim()}
+                        aria-busy={submitting}
+                      >
+                        {submitting ? (
+                          <LoaderCircle
+                            aria-hidden="true"
+                            className="spin"
+                            size={18}
+                          />
+                        ) : (
+                          <Play aria-hidden="true" size={18} />
+                        )}
+                        开始专注
+                      </button>
+                    </div>
+                    <div className="capture-disclosure">
+                      <MonitorDot aria-hidden="true" size={15} />
+                      <span>记录前台应用</span>
+                      <strong>
+                        {!trackingOverview
+                          ? '读取中'
+                          : trackingOverview.settings.captureActivity
+                            ? '开启'
+                            : '关闭'}
+                      </strong>
+                      <Camera aria-hidden="true" size={15} />
+                      <span>
+                        {!trackingOverview
+                          ? '截图设置读取中'
+                          : trackingOverview.settings.captureScreenshots
+                            ? `截图每 ${trackingOverview.settings.screenshotIntervalMinutes} 分钟`
+                            : '截图全局关闭'}
+                      </span>
+                      <label className="session-capture-choice">
+                        <input
+                          type="checkbox"
+                          checked={captureScreenshots}
+                          disabled={
+                            !trackingOverview?.settings.captureScreenshots
+                          }
+                          onChange={(event) =>
+                            setCaptureScreenshots(event.target.checked)
+                          }
+                        />
+                        <span>允许本次截图</span>
+                      </label>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              <div className="day-track" aria-label="本次学习进度">
+                <div className="track-line">
+                  <span
+                    className="track-progress"
+                    style={{
+                      width: `${Math.min(100, (elapsedSeconds / 3600) * 100)}%`,
+                    }}
+                  />
+                  <span
+                    className="track-origin"
+                    style={{
+                      left: `${Math.min(100, (elapsedSeconds / 3600) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <div className="track-labels">
+                  <span>开始</span>
+                  <span>15 分钟</span>
+                  <span>30 分钟</span>
+                  <span>60 分钟</span>
+                </div>
+              </div>
+              <div
+                className="focus-character"
+                data-status={focusStatus}
+                data-asset={focusCharacterAsset.key}
+                aria-hidden="true"
+              >
+                <img src={focusCharacterAsset.src} alt="" draggable="false" />
+              </div>
+            </section>
+
+            <aside className="summary-panel" aria-labelledby="summary-title">
+              <div className="summary-heading">
+                <h2 id="summary-title">时间账户</h2>
+                <WalletCards aria-hidden="true" size={20} />
+              </div>
+              <dl className="metric-list">
+                <div>
+                  <dt>当前时间块</dt>
+                  <dd>{formatCompactDuration(elapsedSeconds)}</dd>
+                </div>
+                <div>
+                  <dt>计时状态</dt>
+                  <dd>
+                    {session?.status === 'running'
+                      ? '积累中'
+                      : session?.status === 'paused'
+                        ? '已暂停'
+                        : '未开始'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>换算规则</dt>
+                  <dd>1 : 1</dd>
+                </div>
+              </dl>
+              <div className="balance-row">
+                <div className="balance-icon">
+                  <Clock3 aria-hidden="true" size={20} />
+                </div>
+                <div>
+                  <span>可用时间</span>
+                  <strong>{formatBalance(state?.balanceSeconds ?? 0)}</strong>
+                </div>
+              </div>
+              <p className="privacy-note">学习记录与余额仅保存在本机。</p>
+            </aside>
           </div>
-          <dl className="metric-list">
-            <div>
-              <dt>当前时间块</dt>
-              <dd>{formatCompactDuration(elapsedSeconds)}</dd>
-            </div>
-            <div>
-              <dt>计时状态</dt>
-              <dd>
-                {session?.status === 'running'
-                  ? '积累中'
-                  : session?.status === 'paused'
-                    ? '已暂停'
-                    : '未开始'}
-              </dd>
-            </div>
-            <div>
-              <dt>换算规则</dt>
-              <dd>1 : 1</dd>
-            </div>
-          </dl>
-          <div className="balance-row">
-            <div className="balance-icon">
-              <Clock3 aria-hidden="true" size={20} />
-            </div>
-            <div>
-              <span>可用时间</span>
-              <strong>{formatBalance(state?.balanceSeconds ?? 0)}</strong>
-            </div>
-          </div>
-          <p className="privacy-note">学习记录与余额仅保存在本机。</p>
-        </aside>
-      </div>
+        </details>
+      )}
 
       {showFinish && session && (
         <FinishDialog
@@ -2984,6 +4299,8 @@ function TodayTasksPanel({
   onSchedule,
   onStartBlock,
   onSkipBlock,
+  onAddMilestone,
+  onSetMilestoneCompleted,
   onClearError,
   onClearPlannerError,
 }: {
@@ -3011,6 +4328,8 @@ function TodayTasksPanel({
   ): Promise<void>
   onStartBlock(block: PlanningTimeBlock): Promise<void>
   onSkipBlock(block: PlanningTimeBlock): void
+  onAddMilestone(taskId: string, content: string): Promise<boolean>
+  onSetMilestoneCompleted(id: string, completed: boolean): Promise<boolean>
   onClearError(): void
   onClearPlannerError(): void
 }) {
@@ -3023,6 +4342,9 @@ function TodayTasksPanel({
   )
   const [scheduleTime, setScheduleTime] = useState(defaultScheduleTime)
   const [scheduleMinutes, setScheduleMinutes] = useState('')
+  const [milestoneDrafts, setMilestoneDrafts] = useState<
+    Record<string, string>
+  >({})
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -3047,6 +4369,21 @@ function TodayTasksPanel({
     await onSchedule(task, startsAt.toISOString(), Math.floor(minutes))
     setSchedulingTaskId(null)
     setScheduleMinutes('')
+  }
+
+  const submitMilestone = async (event: FormEvent, task: PlanningTask) => {
+    event.preventDefault()
+    const content = milestoneDrafts[task.id]?.trim()
+    if (!content) return
+    if (await onAddMilestone(task.id, content)) {
+      setMilestoneDrafts((current) => ({ ...current, [task.id]: '' }))
+    }
+  }
+
+  const generateMilestones = async (task: PlanningTask) => {
+    for (const content of ['准备资料', '核心推进', '检查收尾']) {
+      if (!(await onAddMilestone(task.id, content))) break
+    }
   }
 
   return (
@@ -3257,6 +4594,80 @@ function TodayTasksPanel({
                   </button>
                 </form>
               )}
+              <div className="task-milestone-panel">
+                <div className="task-milestone-heading">
+                  <span>
+                    阶段进度
+                    {taskMilestones(task).length > 0 && (
+                      <strong>
+                        {
+                          taskMilestones(task).filter(
+                            (milestone) => milestone.isCompleted,
+                          ).length
+                        }
+                        /{taskMilestones(task).length}
+                      </strong>
+                    )}
+                  </span>
+                  {taskMilestones(task).length === 0 && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => void generateMilestones(task)}
+                    >
+                      <Sparkles aria-hidden="true" size={13} />
+                      一键拆成 3 阶段
+                    </button>
+                  )}
+                </div>
+                {taskMilestones(task).length > 0 && (
+                  <div className="task-milestone-list">
+                    {taskMilestones(task).map((milestone) => (
+                      <label
+                        data-completed={milestone.isCompleted}
+                        key={milestone.id}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={milestone.isCompleted}
+                          disabled={saving}
+                          onChange={(event) =>
+                            void onSetMilestoneCompleted(
+                              milestone.id,
+                              event.target.checked,
+                            )
+                          }
+                        />
+                        <span>{milestone.content}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <form
+                  className="task-milestone-form"
+                  onSubmit={(event) => void submitMilestone(event, task)}
+                >
+                  <input
+                    aria-label={`为${task.title}添加阶段`}
+                    maxLength={120}
+                    value={milestoneDrafts[task.id] ?? ''}
+                    placeholder="添加完成标准，例如：交付初稿"
+                    onChange={(event) =>
+                      setMilestoneDrafts((current) => ({
+                        ...current,
+                        [task.id]: event.target.value,
+                      }))
+                    }
+                  />
+                  <button
+                    type="submit"
+                    disabled={saving || !milestoneDrafts[task.id]?.trim()}
+                  >
+                    <Plus aria-hidden="true" size={14} />
+                    添加阶段
+                  </button>
+                </form>
+              </div>
             </div>
           ))}
         </div>
@@ -3533,10 +4944,22 @@ function App() {
       ? (requested as ViewKey)
       : 'focus'
   })
+  const [moreOpen, setMoreOpen] = useState(
+    () => !primaryViewKeys.has(activeView),
+  )
   const initialize = useSessionStore((store) => store.initialize)
-  const balanceSeconds = useSessionStore(
+  const storedBalanceSeconds = useSessionStore(
     (store) => store.state?.balanceSeconds ?? 0,
   )
+  const initializeLeisure = useLeisureStore((store) => store.initialize)
+  const leisureState = useLeisureStore((store) => store.state)
+  const leisureElapsedSeconds = useElapsedSeconds(
+    leisureState?.session ?? null,
+    leisureState?.asOfUtc,
+  )
+  const balanceSeconds = leisureState?.session
+    ? Math.max(0, leisureState.balanceSeconds - leisureElapsedSeconds)
+    : storedBalanceSeconds
   const activeDefinition =
     views.find((item) => item.key === activeView) ?? views[0]
   const dismissFeedback = useCallback((id: string) => {
@@ -3574,6 +4997,14 @@ function App() {
     void initialize()
   }, [initialize])
 
+  useEffect(() => {
+    void initializeLeisure()
+  }, [initializeLeisure])
+
+  useEffect(() => {
+    if (!primaryViewKeys.has(activeView)) setMoreOpen(true)
+  }, [activeView])
+
   return (
     <FeedbackContext.Provider value={feedback}>
       <div className="app-shell">
@@ -3589,30 +5020,64 @@ function App() {
           </div>
 
           <nav className="primary-nav" aria-label="主导航">
-            {views.map((view) => {
-              const Icon = view.icon
-              const isActive = view.key === activeView
+            {views
+              .filter((view) => primaryViewKeys.has(view.key))
+              .map((view) => {
+                const Icon = view.icon
+                const isActive = view.key === activeView
 
-              return (
-                <button
-                  key={view.key}
-                  className="nav-item"
-                  data-active={isActive}
-                  type="button"
-                  aria-current={isActive ? 'page' : undefined}
-                  onClick={() => setActiveView(view.key)}
-                >
-                  <Icon aria-hidden="true" size={19} />
-                  {view.label}
-                </button>
-              )
-            })}
+                return (
+                  <button
+                    key={view.key}
+                    className="nav-item"
+                    data-active={isActive}
+                    type="button"
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => setActiveView(view.key)}
+                  >
+                    <Icon aria-hidden="true" size={19} />
+                    {view.label}
+                  </button>
+                )
+              })}
+            <div className="secondary-nav">
+              <button
+                className="nav-item more-nav-button"
+                data-active={!primaryViewKeys.has(activeView)}
+                data-open={moreOpen}
+                type="button"
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((current) => !current)}
+              >
+                <GripVertical aria-hidden="true" size={19} />
+                更多
+                <ChevronDown aria-hidden="true" size={15} />
+              </button>
+              {moreOpen && (
+                <div className="secondary-nav-items">
+                  {views
+                    .filter((view) => !primaryViewKeys.has(view.key))
+                    .map((view) => {
+                      const Icon = view.icon
+                      const isActive = view.key === activeView
+                      return (
+                        <button
+                          key={view.key}
+                          className="nav-item secondary-nav-item"
+                          data-active={isActive}
+                          type="button"
+                          aria-current={isActive ? 'page' : undefined}
+                          onClick={() => setActiveView(view.key)}
+                        >
+                          <Icon aria-hidden="true" size={17} />
+                          {view.label}
+                        </button>
+                      )
+                    })}
+                </div>
+              )}
+            </div>
           </nav>
-
-          <div className="sidebar-footer">
-            <span>可用时间</span>
-            <strong>{formatBalance(balanceSeconds)}</strong>
-          </div>
         </aside>
 
         <main className="main-content" data-view={activeView}>
@@ -3621,27 +5086,36 @@ function App() {
               <span className="date-label">{today}</span>
               <h1>{activeDefinition.label}</h1>
             </div>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={
-                theme === 'light' ? '切换到深色主题' : '切换到浅色主题'
-              }
-              title={theme === 'light' ? '深色主题' : '浅色主题'}
-              onClick={() =>
-                setTheme((current) => (current === 'light' ? 'dark' : 'light'))
-              }
-            >
-              {theme === 'light' ? (
-                <Moon aria-hidden="true" size={19} />
-              ) : (
-                <Sun aria-hidden="true" size={19} />
-              )}
-            </button>
+            <div className="topbar-actions">
+              <div className="topbar-balance">
+                <span>时间余额</span>
+                <strong>{formatBalance(balanceSeconds)}</strong>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={
+                  theme === 'light' ? '切换到深色主题' : '切换到浅色主题'
+                }
+                title={theme === 'light' ? '深色主题' : '浅色主题'}
+                onClick={() =>
+                  setTheme((current) =>
+                    current === 'light' ? 'dark' : 'light',
+                  )
+                }
+              >
+                {theme === 'light' ? (
+                  <Moon aria-hidden="true" size={19} />
+                ) : (
+                  <Sun aria-hidden="true" size={19} />
+                )}
+              </button>
+            </div>
           </header>
 
           <div className="content-area">
             {activeView === 'focus' && <FocusView />}
+            {activeView === 'leisure' && <LeisureView />}
             {activeView === 'planner' && <WeeklyPlannerView />}
             {activeView === 'timeline' && <TimelineView />}
             {activeView === 'analytics' && <AnalyticsView />}
@@ -3649,6 +5123,7 @@ function App() {
             {activeView === 'rewards' && <RewardsView />}
             {activeView === 'challenge' && <ChallengeView />}
             {activeView !== 'focus' &&
+              activeView !== 'leisure' &&
               activeView !== 'planner' &&
               activeView !== 'timeline' &&
               activeView !== 'analytics' &&
@@ -3663,7 +5138,13 @@ function App() {
   )
 }
 
-function useElapsedSeconds(session: StudySession | null, asOfUtc?: string) {
+function useElapsedSeconds(
+  session:
+    | Pick<StudySession, 'status' | 'effectiveDurationSeconds'>
+    | Pick<LeisureSession, 'status' | 'effectiveDurationSeconds'>
+    | null,
+  asOfUtc?: string,
+) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -3714,6 +5195,13 @@ function formatTime(value: string) {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(value))
+}
+
+function formatTimeInput(value: string) {
+  const date = new Date(value)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(
+    date.getMinutes(),
+  ).padStart(2, '0')}`
 }
 
 function formatArchiveDate(value: string) {

@@ -1,4 +1,5 @@
 using TimeBet.Domain;
+using TimeBet.Domain.Leisure;
 using TimeBet.Domain.Sessions;
 
 namespace TimeBet.Domain.Ledger;
@@ -62,6 +63,26 @@ public sealed record LedgerEntry(
             "reward-redemption",
             DomainGuards.NonEmpty(sourceId, nameof(sourceId)),
             DomainGuards.NonEmpty(note, nameof(note)),
+            occurredAtUtc);
+    }
+
+    public static LedgerEntry ForLeisureSession(
+        LeisureSession session,
+        DateTimeOffset occurredAtUtc,
+        Guid? id = null)
+    {
+        if (session.Status != LeisureSessionStatus.Completed || session.ChargedSeconds <= 0)
+        {
+            throw new DomainRuleException("Only a settled leisure session can create a spending entry.");
+        }
+
+        return Create(
+            id ?? Guid.NewGuid(),
+            LedgerEntryType.Spend,
+            -session.ChargedSeconds,
+            "leisure-session",
+            session.Id.ToString("D"),
+            $"自由时间：{session.Activity}",
             occurredAtUtc);
     }
 

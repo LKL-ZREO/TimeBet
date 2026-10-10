@@ -173,6 +173,29 @@ public sealed class SqlitePlanningTimeBlockRepository : IPlanningTimeBlockReposi
         }
     }
 
+    public async Task DeletePlannedAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await connectionFactory.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM planning_time_blocks
+            WHERE id = $id
+              AND status = 'planned'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM study_sessions
+                  WHERE time_block_id = $id AND active_slot = 1
+              );
+            """;
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            throw new InvalidOperationException("The time block is active or has already changed.");
+        }
+    }
+
     private const string BaseSelect = """
         SELECT id, task_id, starts_at_utc_ms, planned_seconds, actual_seconds,
                status, created_at_utc_ms, resolved_at_utc_ms

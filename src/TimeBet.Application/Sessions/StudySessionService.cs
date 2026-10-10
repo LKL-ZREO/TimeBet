@@ -11,19 +11,22 @@ public sealed class StudySessionService
     private readonly IClock clock;
     private readonly IPlanningTaskRepository? planningTasks;
     private readonly IPlanningTimeBlockRepository? planningTimeBlocks;
+    private readonly ILeisureSessionRepository? leisureSessions;
 
     public StudySessionService(
         IStudySessionRepository sessions,
         ILedgerRepository ledger,
         IClock clock,
         IPlanningTaskRepository? planningTasks = null,
-        IPlanningTimeBlockRepository? planningTimeBlocks = null)
+        IPlanningTimeBlockRepository? planningTimeBlocks = null,
+        ILeisureSessionRepository? leisureSessions = null)
     {
         this.sessions = sessions;
         this.ledger = ledger;
         this.clock = clock;
         this.planningTasks = planningTasks;
         this.planningTimeBlocks = planningTimeBlocks;
+        this.leisureSessions = leisureSessions;
     }
 
     public event EventHandler<StudyStateSnapshot>? StateChanged;
@@ -78,6 +81,12 @@ public sealed class StudySessionService
         if (active is not null)
         {
             throw new DomainRuleException("A study session is already active.");
+        }
+
+        if (leisureSessions is not null &&
+            await leisureSessions.GetActiveAsync(cancellationToken) is not null)
+        {
+            throw new DomainRuleException("请先结束当前自由时间，再开始学习计时。");
         }
 
         var transition = StudySession.Start(

@@ -194,6 +194,21 @@ public sealed class PlannerService
         }, task);
     }
 
+    public async Task<bool> DeleteAsync(
+        DeleteTimeBlockRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var block = await blocks.GetAsync(request.Id, cancellationToken)
+            ?? throw new DomainRuleException("Time block does not exist.");
+        if (block.Status != PlanningTimeBlockStatus.Planned)
+        {
+            throw new DomainRuleException("Only planned time blocks can be deleted.");
+        }
+
+        await blocks.DeletePlannedAsync(block.Id, cancellationToken);
+        return true;
+    }
+
     private DateTimeOffset StartOfDayUtc(DateOnly date)
     {
         var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);

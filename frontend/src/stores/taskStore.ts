@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { callBridge } from '../bridge/webview'
-import type { PlanningTask } from '../bridge/types'
+import type { PlanningTask, TaskMilestone } from '../bridge/types'
 
 type TaskStore = {
   tasks: PlanningTask[]
@@ -14,6 +14,8 @@ type TaskStore = {
     dueDate?: string,
   ): Promise<PlanningTask | null>
   setCompleted(id: string, completed: boolean): Promise<boolean>
+  addMilestone(taskId: string, content: string): Promise<boolean>
+  setMilestoneCompleted(id: string, completed: boolean): Promise<boolean>
   clearError(): void
 }
 
@@ -63,6 +65,55 @@ export const useTaskStore = create<TaskStore>((set) => ({
         tasks: completed
           ? current.tasks.filter((item) => item.id !== task.id)
           : current.tasks.map((item) => (item.id === task.id ? task : item)),
+        saving: false,
+      }))
+      return true
+    } catch (error) {
+      set({ saving: false, error: errorMessage(error) })
+      return false
+    }
+  },
+
+  async addMilestone(taskId, content) {
+    set({ saving: true, error: null })
+    try {
+      const milestone = await callBridge<TaskMilestone>('task.milestone.add', {
+        taskId,
+        content,
+      })
+      set((current) => ({
+        tasks: current.tasks.map((task) =>
+          task.id === taskId
+            ? { ...task, milestones: [...(task.milestones ?? []), milestone] }
+            : task,
+        ),
+        saving: false,
+      }))
+      return true
+    } catch (error) {
+      set({ saving: false, error: errorMessage(error) })
+      return false
+    }
+  },
+
+  async setMilestoneCompleted(id, completed) {
+    set({ saving: true, error: null })
+    try {
+      const milestone = await callBridge<TaskMilestone>(
+        'task.milestone.set-completed',
+        { id, completed },
+      )
+      set((current) => ({
+        tasks: current.tasks.map((task) =>
+          task.id === milestone.taskId
+            ? {
+                ...task,
+                milestones: (task.milestones ?? []).map((item) =>
+                  item.id === milestone.id ? milestone : item,
+                ),
+              }
+            : task,
+        ),
         saving: false,
       }))
       return true

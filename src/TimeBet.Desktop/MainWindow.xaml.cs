@@ -4,6 +4,7 @@ using Microsoft.Web.WebView2.Core;
 using TimeBet.Application.Analytics;
 using TimeBet.Application.AI;
 using TimeBet.Application.Challenges;
+using TimeBet.Application.Leisure;
 using TimeBet.Application.Rewards;
 using TimeBet.Application.Reviews;
 using TimeBet.Application.Sessions;
@@ -37,7 +38,8 @@ public partial class MainWindow : Window
         PlannerService plannerService,
         IActivityEvidenceSource activityEvidence,
         DailyReviewService dailyReviewService,
-        AiReviewService aiReviewService)
+        AiReviewService aiReviewService,
+        LeisureSessionService leisureSessionService)
     {
         InitializeComponent();
         var exporter = new SummaryExportService(analytics);
@@ -52,7 +54,8 @@ public partial class MainWindow : Window
             plannerService,
             activityEvidence,
             dailyReviewService,
-            aiReviewService);
+            aiReviewService,
+            leisureSessionService);
         this.screenshotRoot = screenshotRoot;
 
         if (smokeTest)
