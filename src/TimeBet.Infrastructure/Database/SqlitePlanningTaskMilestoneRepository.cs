@@ -19,7 +19,7 @@ public sealed class SqlitePlanningTaskMilestoneRepository : IPlanningTaskMilesto
     {
         await using var connection = await connectionFactory.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = BaseSelect + """
+        command.CommandText = BaseSelect + "\n" + """
             WHERE task_id = $taskId
             ORDER BY sort_order, created_at_utc_ms, id;
             """;
